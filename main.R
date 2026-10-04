@@ -6,6 +6,7 @@ argsArg <- which(startsWith(cArgs, "--args"))
 runningScript <- normalizePath(sapply(strsplit(cArgs[fileArg], "--file="), "[", 2))
 
 source(sub("main.R", "expressionMatched.R", runningScript))
+source(sub("main.R", "qc.R", runningScript))
 
 p_thresh <- 0.1
 fc_thresh <- 1.3
@@ -46,8 +47,14 @@ mh_counts <- mh_counts[gene_ids, make.names(sapply(strsplit(rownames(deseq_meta)
 mh_counts <- rowMeans(mh_counts) / ((abs(gga_wf$DominantTES - gga_wf$DominantTSS) + 1 - subtract_TSS_TES) / 1000) # counts/kb
 exp_dat <- data.frame(GeneID=gene_ids, Expression=mh_counts)
 
-# run expressionMatched() with 3 different seeds
+# run expressionMatched() with 3 different seeds, writing the matched list and
+# a QC report + violin plot for each
 for (i in 1:3){
   exp_matched <- expressionMatched(genes_of_interest, unchanged_genes, exp_dat, 10, setSeedNum=i)
-  write(exp_matched, paste0("expression_matched-", ref_condition, "_", i, ".txt"))
+  out_prefix <- paste0("expression_matched-", ref_condition, "_", i)
+  write(exp_matched, paste0(out_prefix, ".txt"))
+  # QC: compare target / control / expression-matched expression distributions
+  expressionMatchQC(genes_of_interest, unchanged_genes, exp_matched, exp_dat,
+                    out_prefix = out_prefix,
+                    plot_title = paste0(ref_condition, " (seed ", i, ")"))
 }
