@@ -12,22 +12,28 @@ matching). Most tools are **HMS-O2-specific**: hardcoded `/n/data1/...` paths an
 
 **Two execution styles — don't assume.** A *smartSlurm pipeline* is an annotated bash
 driver with `#@` step markers that `runAsPipeline` turns into a Slurm DAG (`ssbatch`
-sizing, flag-folder rerun). Only **RNAseqMapping, pipeline2, DOBBE_F** are these.
-Everything else is standalone scripts — several (GGA, MHT, peakMorph) build their own
-`sbatch --dependency` DAGs by hand, which is **not** smartSlurm. `make_heatmap` (from
-NIH_scripts) is the shared matrix engine behind most analysis tools.
+sizing, flag-folder rerun). Only **RNAseqMapping, pipeline2, DOBBE_F, and now ChIPseq**
+are these (ChIPseq gained an rAP driver in its 2026 cleanup, alongside a still-present
+legacy fan-out). Everything else is standalone scripts — several (GGA, MHT, peakMorph)
+build their own `sbatch --dependency` DAGs by hand, which is **not** smartSlurm.
+`make_heatmap` (from NIH_scripts) is the shared matrix engine behind most analysis tools.
 
 ## Foundation
 - **smartSlurm** (`runAsPipeline`, `ssbatch`, rAP) — the pipeline engine. Parses `#@`
   bash annotations into a Slurm job DAG with resource estimation and rerun/resume.
-  *Substrate under RNAseqMapping / pipeline2 / DOBBE_F.* Use when: writing/modifying any
-  rAP driver. → skill `smartslurm-pipelines`, `reference/runAsPipeline-grammar.md`.
+  *Substrate under RNAseqMapping / pipeline2 / DOBBE_F / ChIPseq.* Authoritative branch is
+  now **`master`** (the `ux-update` work merged in 2026-10 and that branch was deleted);
+  named-flag CLI, `#@end` explicit block closure, **jobRecords v2** history, and
+  `checkRun`/`checkRunGrid`/`diagnose.sh`. The former standalone slurmless test harness is
+  now vendored as its **`slurmless/` subdir**. Use when: writing/modifying any rAP driver.
+  → skill `smartslurm-pipelines`, `reference/runAsPipeline-grammar.md`.
 - **Genome_Onboarding** (`genome_setup`) — onboard a reference genome. In: GTF+FASTA
   URLs, spike FASTA, config. Out: UCSC-named `basic.gtf`, bowtie2/STAR/kallisto indexes,
   chrom.sizes, TSS `formakeheatmap` lists → NTC shared storage. Downstream: ~everything.
   Use when: adding a genome / building indexes or annotations.
 - **ntc_env** — conda/mamba env YAMLs (one per tool) + dREG install recipe. Provides
-  `ntc`/`ntc_basic`, `proseq_env`, `gga`, `rnaseq_env`, `genome_setup_env`, `dreg`.
+  `ntc`/`ntc_basic`, `proseq_env`, `gga`, `rnaseq_env`, `genome_setup_env`,
+  `ntc-extra` (`how_are_we_stranded_here` etc.), `dreg`.
   Use when: choosing/building an env or debugging version pins (esp. dREG CUDA/R).
 - **NIH_scripts** (`make_heatmap`, `bowtie2stdBedGraph`, `bedgraphs2stdBedGraph`,
   `normalize_bedGraph`, trim_and_filter) — low-level NGS utilities (Perl/C++). The
@@ -44,12 +50,15 @@ NIH_scripts) is the shared matrix engine behind most analysis tools.
   1-nt & bin10 **3'/5' stranded bedGraphs**, make_heatmap matrices, DESeq2, QC. The
   PRO-seq hub feeding proTSScall, DOBBE_F, prepareBrowser, pauseIndex, MHT, peakMorph.
   Emits **bedGraphs, not bigWigs**. Use when: mapping PRO-seq/Start-seq.
-- **ChIPseq** (`ChIP-seq mapping`, `chip-seq-rhel`) — ChIP-seq / CUT&RUN read mapping + QC
-  (standalone scripts, **not rAP**; plain-`sbatch` fan-out). In: FASTQ/SRA + positional
-  manifest, bowtie1 indexes. Out: SAM/BAM, unstranded bedGraph/bigWig tracks, HOMER QC peaks,
-  TSS/TES + whole-transcript metaplots (make_heatmap), mapping-stats TSV. Uses GGA/proTSScall
-  `formakeheatmap` anchors; overlaps MHT (which also supports ChIP-seq). **NEW, "under
-  development"**; env not yet in ntc_env. Use when: mapping/QC-ing ChIP-seq.
+- **ChIPseq** (`ChIP-seq mapping`, `ChIPseq_rAP_pipeline_submission`) — ChIP-seq / CUT&RUN
+  mapping + peaks + QC. **Now a smartSlurm/rAP pipeline** (19-step `#@…#@end` driver), with
+  the **legacy plain-`sbatch` fan-out still present**. In: **header-driven TSV manifest**
+  (per-library; antibody/input-control auto-resolution; PE or SE), bowtie1 indexes. Out:
+  per-antibody output tree — BAMs, unstranded bedGraph/bigWig tracks, HOMER peaks, TSS/TES +
+  whole-transcript metaplots (make_heatmap), ChIPQC/MultiQC/peak-corr, mapping-stats. Single
+  in-repo conda env `chipseq` (**not yet in ntc_env** — gap NTC-013a). Uses GGA/proTSScall
+  `formakeheatmap` anchors; overlaps MHT. **"Under development"; rAP path not yet validated on
+  real O2 Slurm.** Use when: mapping/QC-ing ChIP-seq. → skill `chipseq`.
 
 ## Annotation (define TSS/TES/dominant transcripts)
 - **TSScall** (`obsTSS`, `uTSS`) — call annotated + novel TSSs from 1-nt 5' bedGraphs.
@@ -89,10 +98,24 @@ NIH_scripts) is the shared matrix engine behind most analysis tools.
   *In flux (2026, pilot-stage) — catalog entry only, no skill yet.*
 
 ## Dev / test
-- **slurmless_smartSlurm_testing** (`slurmless`) — Slurm-free regression harness for
-  **smartSlurm itself** (mock sbatch/sacct + 10 rAP test fixtures). Not wired to NTC
-  pipelines; useful to prototype rAP conversion without a cluster.
-  *Dev/test tool — catalog entry only, no skill.*
+- **slurmless** (`slurmless_smartSlurm_testing`) — Slurm-free regression harness for
+  **smartSlurm itself** (mock sbatch/sacct + rAP test fixtures). **The standalone repo is
+  ARCHIVED**; slurmless is now vendored as the **`slurmless/` subdirectory of smartSlurm**
+  (≈40 test blocks), where all future dev continues. Not wired to NTC pipelines; useful to
+  prototype rAP conversion / estimator changes without a cluster. Load it to test an rAP driver
+  (incl. ChIPseq) off-cluster before O2. → skill `slurmless-harness` (sourced from
+  `smartSlurm/slurmless`).
+
+## Ops / QC utilities
+- **utilities** (`ntc-agnt/utilities`) — grab-bag of standalone helper scripts (not smartSlurm). Each has its
+  own README. (1) `distribute.sh` — PRO-seq data **distribution** helper: archive a
+  pipeline2 outdir to `userData`, stage large files to scratch, and curate + `rclone`
+  to Dropbox, driven by the PRO-seq metadata CSV; additive-only, dry-run-first, runs on
+  an HMS transfer node. Consumes pipeline2 outputs (bedGraphs, GGA/proTSScall calls,
+  DESeq2, pause_index, browser bigWigs). (2) `hawsh.sh` — RNA-seq/TT-seq **strandedness
+  QC** wrapper around `check_strandedness` (`how_are_we_stranded_here`, from `ntc_env`'s
+  `ntc-extra` env); complements RNAseqMapping, uses the same NTC-hosted references.
+  *Catalog entry only, no skill yet.*
 
 ## Relationships (data-flow DAG)
 
@@ -116,8 +139,8 @@ NIH_scripts) is the shared matrix engine behind most analysis tools.
                  └──(browser bg)      DOBBE_F      metagene_   Expression-   peakMorph
                                       (dREG eRNA)  heatmap     Matching      _toolkit
                                                    _tool       (+DESeq2)
- smartSlurm = substrate under RNAseqMapping / pipeline2 / DOBBE_F.
- slurmless_smartSlurm_testing tests smartSlurm itself (separate from the pipelines).
+ smartSlurm = substrate under RNAseqMapping / pipeline2 / DOBBE_F / ChIPseq.
+ slurmless (now smartSlurm/slurmless subdir; standalone repo archived) tests smartSlurm itself.
 ```
 
 ## Shared format currency (the glue)
@@ -134,11 +157,12 @@ NIH_scripts) is the shared matrix engine behind most analysis tools.
 
 ## Conventions & caveats
 - **O2 + group paths** everywhere (`hpc_ntc` vs `hpc_adelman`); little runs off-cluster.
-- **rAP vs hand-rolled DAG**: only RNAseqMapping/pipeline2/DOBBE_F are smartSlurm; GGA/
-  MHT/peakMorph submit plain dependent `sbatch` jobs.
-- **runAsPipeline CLI**: authoritative smartSlurm is `ld32/SmartSlurm` branch **`ux-update`**
-  (NTC decision 2026-10), which uses **named flags** (`--script --tmp --mode --lint`) and a
-  new `#@end` explicit block-closure mode. The legacy positional form (`"script" noTmp run`)
-  in the pipeline READMEs is stale and not accepted — see `reference/runAsPipeline-grammar.md`.
+- **rAP vs hand-rolled DAG**: RNAseqMapping/pipeline2/DOBBE_F/ChIPseq are smartSlurm; GGA/
+  MHT/peakMorph submit plain dependent `sbatch` jobs. (ChIPseq also keeps a legacy fan-out.)
+- **runAsPipeline CLI**: authoritative smartSlurm is now branch **`master`** (the `ux-update`
+  work merged 2026-10-22 and that branch was deleted), which uses **named flags**
+  (`--script --tmp --mode --lint --pipeline`) and the `#@end` explicit block-closure mode.
+  The legacy positional form (`"script" noTmp run`) in the pipeline READMEs is stale and not
+  accepted — see `reference/runAsPipeline-grammar.md`.
 - **TSScall ≠ proTSScall** (different mechanisms; proTSScall is not a fork).
 - **make_heatmap** binary (NIH_scripts) is a hard dependency for most analysis tools.

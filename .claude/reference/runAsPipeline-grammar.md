@@ -1,20 +1,31 @@
 # smartSlurm `runAsPipeline` / `ssbatch` grammar cheat sheet
 
 Self-contained reference for analyzing NTC bash driver scripts. Source of truth:
-`/opt/ntc/smartSlurm` (`bin/runAsPipeline`, `bin/ssbatch`, `README.md`). Verified
-against code, not just docs.
+`/opt/ntc/smartSlurm` (`bin/runAsPipeline`, `bin/ssbatch`, `bin/jobRecordSchema.sh`,
+`README.md`). Verified against code, not just docs.
+
+> **Authoritative branch is now `master`.** The `ux-update` work was merged to `master`
+> (`e1432b9`, 2026-10-22) and the `ux-update` branch deleted (NTC decision 2026-10 is
+> satisfied — current `master`, verified at `52c849e`, *is* the former ux-update line).
+> Author and validate against `master`; the O2 deployment at
+> `/n/data1/cores/ntc/scripts/SmartSlurm` should track `master`. Anything in the NTC
+> pipeline READMEs or older notes that says "use branch `ux-update`" is now stale → `master`
+> (backlog NTC-008).
 
 > **How to classify a script.** A script is a **runAsPipeline (rAP) pipeline** only
 > if it contains `#@` decorator comment lines. `grep -n '#@' script.sh`. No `#@`
 > lines ⇒ it is a **standard script** — read it by ordinary shell semantics, do NOT
 > impose a DAG. Classification is **per script**, not per repo; one repo may hold both.
+> The true rAP pipelines are **RNAseqMapping, pipeline2, DOBBE_F, and now ChIPseq**
+> (its new `ChIPseq_rAP_pipeline_submission.sh`); GGA/MHT/peakMorph are hand-rolled
+> `sbatch --dependency` DAGs, not rAP.
 
 ---
 
 ## 1. The `#@` job block
 
 A *job block* = one `#@` marker line + the command line(s) directly beneath it, up to
-the next **blank line**.
+its terminator (blank line or `#@end` — see §1.1).
 
 ```
 #@ stepID , dependIDs , name , reference , inputs , sbatchOptions
@@ -43,16 +54,23 @@ Rules verified in `runAsPipeline`:
 - **Job arrays are NOT supported** — `--array=`/`-a` in a step's sbatch options ⇒ error.
 - `ssbatch` must NOT appear in a command line inside the script ⇒ error (rAP adds it).
 
-### Where a block ends — two modes (authoritative smartSlurm = ux-update)
-**Dual block-closure mode (ux-update, `426709f`).** `runAsPipeline` picks the mode per
-script: if the script contains **any** `#@end` line, the WHOLE script is parsed in
-**explicit-closure mode** — blank lines are treated as *body*, only `#@end` closes a block,
-and an unclosed `#@` at end-of-script is an error. If there is no `#@end` anywhere, the
-**legacy blank-line mode** below applies. `--lint` warns where a block relies on legacy
-blank-line closure. Prefer `#@ … #@end` for new/edited pipelines; it removes the blank-line
-foot-guns (heredocs, `done`, trailing commands).
+### 1.1 Where a block ends — two modes
 
-**Legacy blank-line mode (no `#@end` in the script):**
+`runAsPipeline` picks the mode **per script**:
+
+**Explicit-closure mode (`#@end`).** If the script contains **any** `#@end` line, the WHOLE
+script is parsed in explicit-closure mode:
+- blank lines are treated as *body* (no longer terminators),
+- only `#@end` closes a block,
+- an unclosed `#@` at end-of-script is an error.
+- In this mode each block body is written out as a **heredoc** to an on-disk step script
+  `smartSlurmLog/jobs/<flag>/cmd.sh` (so multi-line bodies, `done`, and trailing commands
+  are safe); literal `$` that must reach the node is escaped `\$` in the generated heredoc.
+- `--lint` warns where a block relies on legacy blank-line closure.
+- **Prefer `#@ … #@end`** for new/edited pipelines — it removes the blank-line foot-guns.
+  ChIPseq's rAP driver uses this mode throughout.
+
+**Legacy blank-line mode (no `#@end` anywhere in the script):**
 - A `#@` block greedily collects **every following line** (joined with `;`) until a
   **blank/whitespace-only line**. Always leave a blank line before `done`, the next
   `#@`, or any following plain command, or they get swallowed into the job command.
@@ -73,13 +91,14 @@ PHASE 1 CONVERT (once, submit host):  runAsPipeline reads script top→bottom an
    smartSlurmLog/slurmPipeLine.<md5>.sh   (<md5> = md5sum of your script contents)
      • for / while / #loopStart  → remember loop var (becomes part of each job flag)
      • #@ marker + command        → emit an  ssbatch --wrap "command"  call
+                                     (or, in #@end mode, a jobs/<flag>/cmd.sh heredoc)
      • any other line             → copied through unchanged
 PHASE 2 SUBMIT (run the converted script):
      • plain lines  → run NOW, on the submit host
      • ssbatch call → SUBMIT a job (capture id); command runs LATER on a node once
                       -d afterok:<deps> is satisfied. Independent jobs beyond
                       firstBatchCount (5) are submitted HELD (-H), released after early
-                      jobs produce ≥3 records so later jobs can be resource-estimated.
+                      jobs produce records so later jobs can be resource-estimated.
 ```
 
 Consequences to watch for when reading/modifying a pipeline:
@@ -90,6 +109,8 @@ Consequences to watch for when reading/modifying a pipeline:
   unless rerun chosen (detected by `<flag>.success` in `smartSlurmLogDir`).
 - Functions defined in plain scope are **not** visible inside `#@` blocks — `export -f`
   them first.
+- **`/bin/sh` must be bash.** The generated script and step heredocs rely on bash features;
+  a dash `/bin/sh` breaks the run.
 
 ### Two variable scopes
 | Scope | What lives here | Evaluated | Visible to |
@@ -98,7 +119,8 @@ Consequences to watch for when reading/modifying a pipeline:
 | **Node** | code inside a `#@` block | later, on the compute node | only that one job |
 
 - `$var` assigned in submit scope, used in a `#@` block ⇒ **baked in at submission**.
-- `$var` assigned *and* used inside the same `#@` block ⇒ deferred, expands **on the node**.
+- `$var` assigned *and* used inside the same `#@` block ⇒ deferred, expands **on the node**
+  (in `#@end` mode this is the `\$`-escaped form in `cmd.sh`).
 - A var assigned inside a `#@` block exists nowhere else.
 - **Steps pass data through files on shared storage, never through shell variables.**
   Convention: name each output path as a submit-scope var *immediately above* the `#@`
@@ -113,6 +135,13 @@ Consequences to watch for when reading/modifying a pipeline:
 
 rAP preserves loop structure but extracts the `#@` blocks inside; the **loop variable
 becomes part of each job's flag** (`1.0.findNumber.1`, `1.0.findNumber.2`, …).
+
+Loop detection is **first-word** on the line (hardened on master): a line whose first token
+is `for` opens a loop, `done` closes it, and `#loopStart:<var>` declares the var for a
+`while`/`read` loop. A `for`/`done`/`#loopStart` appearing mid-line or mid-command is not
+treated as loop structure — so a driver line must not *start* with `for` unless it is a real
+loop (ChIPseq works around this by keeping manifest `for`-logic out of the driver, in
+`prepare_manifest.sh`).
 
 - **`for` loops**: the var right after `for` is auto-detected.
   ```bash
@@ -137,7 +166,7 @@ becomes part of each job's flag** (`1.0.findNumber.1`, `1.0.findNumber.2`, …).
 ```
 runAsPipeline --script "SCRIPT [ARGS]" --tmp {useTmp|noTmp} \
    [--sbatch-options "sbatch -p short -c 1 --mem 2G -t 50:0"] \
-   [--mode dryrun] [--lint] [--email noEmail|noSuccEmail] \
+   [--mode dryrun] [--lint] [--pipeline NAME] [--email noEmail|noSuccEmail] \
    [--special checkpoint|excludeFailedNodes] [-v|--verbose | -q|--quiet] [-A|--account=ACCT]
 ```
 
@@ -148,25 +177,28 @@ runAsPipeline --script "SCRIPT [ARGS]" --tmp {useTmp|noTmp} \
 | `--sbatch-options "…"` | default sbatch for steps with no own options; must start `sbatch` | `sbatch -p short -c 1 --mem 2G -t 50:0` |
 | `--mode dryrun` | build + log plan, submit nothing | submit |
 | `--lint` | parse + warn (e.g. legacy blank-line closure) without submitting | off |
+| `--pipeline NAME` | label this run/pipeline (groups logs/records under a pipeline name) | derived |
 | `--email noEmail\|noSuccEmail` | silence all / success emails | all |
 | `--special checkpoint\|excludeFailedNodes` | checkpoint long jobs / avoid previously-failing nodes | none |
 | `-v\|--verbose`, `-q\|--quiet` | output verbosity | normal |
 
-> [!IMPORTANT]
-> **Authoritative smartSlurm = `ld32/SmartSlurm` branch `ux-update`** (per NTC decision,
-> 2026-10; verified at commit `426709f`), even though it is not yet merged to upstream
-> `master`. Its `runAsPipeline` parses **named flags only** (`--script`, `--tmp`, `--mode`,
-> `--lint`, `-v/-q`, …) and aborts on any unknown token — the same named-flag form as the
-> `ntc-agnt/smartSlurm` master clone. The **legacy positional form**
-> `runAsPipeline "SCRIPT ARGS" useTmp|noTmp run` used in the pipeline READMEs
-> (RNAseqMapping, pipeline2, DOBBE_F) is **not accepted** by either and should be treated
-> as stale — the READMEs need updating (backlog NTC-008). The deployed
-> `/n/data1/cores/ntc/scripts/SmartSlurm` should track `ux-update`.
+- **Named flags only.** `runAsPipeline` parses named flags and aborts on any unknown token.
+  The **legacy positional form** `runAsPipeline "SCRIPT ARGS" useTmp|noTmp run` in the
+  pipeline READMEs is **not accepted** and is stale (backlog NTC-008).
+- `--pipeline NAME` is new on master and not yet in the README — note it when documenting.
 
-Outputs land in `smartSlurmLog/` (relative to cwd): per-step `.sh` job scripts, `.out`
-logs, `.success`/`.failed` flag files, `allJobs.txt`, and `.smartSlurm.log`.
-`checkRun` (run from the launch dir) browses status/logs; `cancelAllJobs` cancels this
-dir's running/pending jobs.
+Outputs land in `smartSlurmLog/` (relative to cwd): per-step `.sh`/`jobs/<flag>/cmd.sh`
+scripts, `.out` logs, `.success`/`.failed` flag files, `allJobs.txt`, and `.smartSlurm.log`.
+
+### 4.1 Companion tooling (master)
+- **`checkRun`** — browse step status/logs from the launch dir.
+- **`checkRunGrid`** — grid/matrix status view across steps/samples (new).
+- **`diagnose.sh`** — post-run diagnostics helper (new).
+- **`cancelAllJobs`** — cancel this dir's running/pending jobs before a rerun.
+- **`smartSlurmSetup.sh`** + `smartslurm activate|deactivate` — set up / toggle smartSlurm on
+  `PATH` for a shell (the old `unExport` path is **deprecated**).
+- **`jrRepair.sh`** — upgrade an old v1 `jobRecord.txt` in place to the v2 schema (§5.1).
+- Retired: the plotting PNGs and `workflowPlot.py` (no longer part of the toolchain).
 
 ---
 
@@ -179,26 +211,47 @@ ssbatch [-P PROGRAM] [-I INPUTS] [-F FLAG] [SBATCH_OPTIONS] SCRIPT.sh [ARGS] [dr
 
 - `-P` program label (stats grouping); `-I` input file(s)/dir(s) or `jobSize:N`; `-F`
   unique flag. All three optional but `-P`/`-I` make estimation good.
-- **Resource estimation** (`estimateResource.sh`), needs **≥3 completed records** for a
-  program/reference else uses defaults:
-  - with `-I`: linear fit of input size → mem and → time from past records.
-  - without `-I`: 90th percentile of the program's past mem/time.
-- **jobRecord.txt**: 18-col CSV of every successful job (default `~/.smartSlurm/`).
-  Estimation keys on **program (col 12)** + **reference (col 13)**, reads **memUsed
-  (col 7)**, **timeUsed (col 8)**; **inputSize (col 2)** drives the size fit.
 - **Partition** auto-chosen from requested run-time via `adjustPartition` in
   `config.txt` (`partition{1,2,3}TimeLimit`); a bad `-p` is corrected for you.
-- **OOM/OOT auto-resubmit**: `cleanUp.sh` records usage; a job that died
-  out-of-memory/time is resubmitted with **doubled** mem/time and its formula cleared.
+- **OOM/OOT auto-resubmit**: `cleanUp.sh` records usage; a job that died out-of-memory/time
+  is resubmitted using the **banded next-step** `nextMemAfterFail` / `nextTimeAfterFail`
+  (step up to the next band / roughly double) with its formula cleared, up to a cap.
 - **Checkpointing** (opt-in): snapshot + resume a long job before it hits its limit.
-- **Emails**: `cleanUp.sh` emails the job script, exact submit command, and logs (unlike
-  Slurm's subject-only mail). Dampen with `noSuccEmail` / `noEmail`.
+- **Emails**: `cleanUp.sh` emails the job script, exact submit command, and logs. Dampen with
+  `noSuccEmail` / `noEmail`.
 - Key `config.txt` knobs: `defaultMem=4096`M, `defaultTime=120`min, `defaultExtraMem`,
   `defaultExtraTime`, `firstBatchCount=5`.
 
-> **`firstBatchCount` (5) ≠ the "3 records" rule.** 3 records = minimum before
-> estimation works. `firstBatchCount` = how many independent rAP jobs run immediately
-> before the rest are held pending early records.
+> **`firstBatchCount` (5) ≠ the records-minimum rule.** A few records are the minimum before
+> the size-fit model engages. `firstBatchCount` = how many independent rAP jobs run
+> immediately before the rest are held pending early records.
+
+### 5.1 jobRecords v2 (the resource history)
+The schema moved from the old positional 18/21-column CSV to a **named v2 schema** defined in
+`bin/jobRecordSchema.sh` — **17 fields**, written by column *name*, not position:
+
+```
+pipeline  step  ref  sample  jobID  inputSize  memUsed  memAllocated
+timeUsed  timeAllocated  cores  status  user  node  epoch  isoDate  flag
+```
+
+- Default location `~/.smartSlurm/jobRecord.txt` (+ `stats/`). One row per completed job.
+- **Reference-class pooling:** the `ref` key is normalized into a class (e.g. a mammalian
+  genome → `mammal`) so records from like-sized references pool for estimation.
+- **`jrRepair.sh`** upgrades a legacy v1 file to v2 in place; run it once on an old history.
+- `sbatchBin/sbatch` (the bundled mock/passthrough) is **stale** — it still writes a v1
+  header, so don't rely on it to produce v2 records; the real cluster path writes v2.
+
+### 5.2 Resource estimation model (`estimateResource.sh` / `calculateMemTime.sh`)
+Estimation keys on **program + reference-class**, reading `memUsed`/`timeUsed`, with
+`inputSize` driving the size fit:
+- **With input size:** a linear fit of size → mem and size → time, taken as `line × (1+frac)`
+  evaluated at the **93rd percentile** (a headroom margin above the fitted line).
+- **Slope ≤ 0:** falls back to a **constant model** (percentile of past usage, no size term).
+- **Thin data** (too few records to fit): a **trend-scaled fallback** — scale a baseline by
+  the limited trend available rather than fitting.
+- **Failure floor:** estimates never drop below a floor derived from prior failures for that
+  key, so a job that once OOM'd isn't re-sized too small.
 
 ---
 
@@ -206,3 +259,15 @@ ssbatch [-P PROGRAM] [-I INPUTS] [-F FLAG] [SBATCH_OPTIONS] SCRIPT.sh [ARGS] [dr
 `ssbatch` takes standard sbatch syntax, so Snakemake / Nextflow / Cromwell can use it as
 their cluster submit command and inherit smart sizing (see smartSlurm `bin/Snakefile`,
 `bin/nextflow.nf`, and README "Using ssbatch with other pipeline managers").
+
+---
+
+## 7. slurmless — now vendored in-tree
+The former standalone `slurmless_smartSlurm_testing` repo is **archived**; its successor lives
+as the **`slurmless/` subdirectory of smartSlurm** and is where all future slurmless dev
+continues. It is a Slurm-free regression harness for smartSlurm *itself* (mock `sbatch`/
+`sacct`, fixtures, resource models), not wired to the NTC pipelines. Layout:
+`slurmless/bootstrap.sh`, `slurmless/test/run_tests.sh` (≈41 test blocks),
+`slurmless/test/checkrun_ui_tests.sh`, `slurmless/test/mockSlurm/`, fixtures + models, and a
+skill stub `slurmless/.claude/skills/slurmless-harness/SKILL.md`. Use it to prototype an rAP
+conversion or a resource-estimation change without a cluster.

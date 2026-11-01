@@ -8,6 +8,9 @@ dev / deep-analysis agent.
 
 - **Load this repo's skill first:** `.claude/skills/expression-matching/SKILL.md` — its architecture,
   I/O contract, dependencies, and gotchas (deeper tables under its `reference/`).
+- **Coding style (required):** follow `.claude/ntc-coding-style.md` — clear, simple,
+  well-commented code for a biologist audience; validate inputs; informative errors; cleverness
+  only for *significant* gains. Lint before handoff (shellcheck/lintr/ruff). Review rules: `REVIEW.md`.
 - **Ecosystem awareness** (the other NTC tools, how data flows between them, and the shared
   file-format contracts) is imported just below.
 - **Need deep detail on ANOTHER NTC tool?** Open the `ntc-ecosystem-context` meta-repo (or
@@ -21,6 +24,6 @@ dev / deep-analysis agent.
 
 @.claude/ntc-ecosystem.md
 
-<sub>Generated from ntc-ecosystem-context @ 435cddc on 2026-10-26 by make-repo-stub.sh. Do not
+<sub>Generated from ntc-ecosystem-context @ 4f279eb on 2026-11-01 by make-repo-stub.sh. Do not
 hand-edit this block or `.claude/ntc-*`; regenerate from the meta-repo.</sub>
 <!-- END NTC ECOSYSTEM CONTEXT (generated) -->
