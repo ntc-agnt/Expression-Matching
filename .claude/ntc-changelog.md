@@ -12,3 +12,6 @@ Entry format (newest first):
 ```
 
 <!-- entries below, newest first -->
+
+## 2026-11-03 · claude/matchit-matcher
+- Prototype: MatchIt-based covariate matcher (joint expression+length nearest-neighbour) as an alternative to decile expression matching, with QC (balance table + distribution plots); adds matchitMatched.R, matchQC.R, main_matchit.R; experimental branch, not merged; affects results: no
