@@ -122,6 +122,21 @@ if (length(setdiff(ref_cols, colnames(mh)))) stop("baseline sample column(s) mis
 common <- intersect(rownames(mh), rownames(gga))
 counts_kb <- rowMeans(mh[common, ref_cols, drop = FALSE]) / ((gene_len_all[common] - window) / 1000)
 
+# Guard against a mismatched gene list: IDs absent from the annotation are
+# silently dropped by the matching, so report how many were found and fail loudly
+# if fewer than half match (usually a wrong ID type or a stray header line).
+n_in    <- length(genes_of_interest)
+n_found <- length(intersect(genes_of_interest, common))
+frac    <- if (n_in > 0) n_found / n_in else 0
+message(sprintf("Genes of interest: %d supplied, %d found in annotation (%.0f%%), %d dropped.",
+                n_in, n_found, 100 * frac, n_in - n_found))
+if (frac < 0.5) {
+  stop(sprintf("only %d of %d genes of interest (%.0f%%) are in the annotation; ",
+               n_found, n_in, 100 * frac),
+       "check they are ENSG IDs matching the makeHeatmap/GGA rownames and that the ",
+       "list has no header line.", call. = FALSE)
+}
+
 ## --- optional user covariate file (GeneID + numeric columns) ---
 covfile <- NULL
 if (!is.null(opt[["covar-file"]])) {

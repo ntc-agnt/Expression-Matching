@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-04 · main
+- matchit_match.R: add a gene-list sanity guard - report how many --genes IDs are found in the annotation vs dropped, and stop with a clear message if <50% match (wrong ID type or stray header). affects results: no
+
+## 2026-11-04 · main
 - Demote the legacy decile driver to archive/main.R (fixed its functions.R source path to the repo root). Updated README usage + overview. Algorithm/outputs unchanged. affects results: no
 
 ## 2026-11-04 · main
