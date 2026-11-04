@@ -35,7 +35,10 @@
 cArgs <- commandArgs()
 fileArg <- which(startsWith(cArgs, "--file="))
 runningScript <- normalizePath(sapply(strsplit(cArgs[fileArg], "--file="), "[", 2))
-here <- function(f) sub("benchmark_matchers.R", f, runningScript)
+# This script lives in tests/; the matcher/QC libraries it sources are in the repo
+# root one level up.
+repo_root <- dirname(dirname(runningScript))
+here <- function(f) file.path(repo_root, f)
 source(here("expressionMatched.R"))
 source(here("matchitMatched.R"))
 source(here("matchQC.R"))

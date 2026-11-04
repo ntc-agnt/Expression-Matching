@@ -13,6 +13,9 @@ Entry format (newest first):
 
 <!-- entries below, newest first -->
 
+## 2026-11-04 · main
+- Consolidate the MatchIt matcher work onto main: matchit_match.R (covariate matching workflow, --method default matchit, legacy expression mode), matchitMatched.R, matchQC.R. Moved benchmark_matchers.R and the legacy qc.R to tests/. Applied the corrected README and documented the new workflow. main.R unchanged (frozen legacy driver). affects results: no
+
 ## 2026-11-04 · claude/matchit-matcher
 - matchit_match.R: add --method flag (default 'matchit'; 'expression'/'legacy' = original decile matcher, expression-only) so legacy control sets remain reproducible; outputs stamped with method (matched_controls.<method>.txt, run_info, QC) and shared QC exposes what legacy leaves unbalanced. Experimental branch, not merged; affects results: no
 
