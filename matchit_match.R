@@ -40,9 +40,7 @@ fc_thresh <- 1.3    # linear fold-change band [1/fc_thresh, fc_thresh] = "unchan
 cArgs <- commandArgs()
 runningScript <- normalizePath(sapply(strsplit(cArgs[which(startsWith(cArgs, "--file="))], "--file="), "[", 2))
 here <- function(f) sub("matchit_match.R", f, runningScript)
-source(here("matchitMatched.R"))
-source(here("matchQC.R"))
-source(here("expressionMatched.R"))   # legacy decile matcher (--method expression)
+source(here("functions.R"))   # expressionMatched(), matchitMatched(), matchQC()
 `%||%` <- function(a, b) if (is.null(a)) b else a   # default for an unset flag
 
 ## --- flag parsing + validation ---

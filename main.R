@@ -5,7 +5,7 @@ fileArg <- which(startsWith(cArgs, "--file="))
 argsArg <- which(startsWith(cArgs, "--args"))
 runningScript <- normalizePath(sapply(strsplit(cArgs[fileArg], "--file="), "[", 2))
 
-source(sub("main.R", "expressionMatched.R", runningScript))
+source(sub("main.R", "functions.R", runningScript))
 
 p_thresh <- 0.1
 fc_thresh <- 1.3

@@ -7,8 +7,8 @@
 # method's blind spot, and reports how well each method balances every covariate.
 #
 # Methods compared (a method is skipped with a note if its package is absent):
-#   - Expression : the repo decile expression matcher (expressionMatched.R), expr only
-#   - MatchIt    : 1:1 nearest-neighbour Mahalanobis matching (matchitMatched.R),
+#   - Expression : the repo decile expression matcher (functions.R: expressionMatched()), expr only
+#   - MatchIt    : 1:1 nearest-neighbour Mahalanobis matching (functions.R: matchitMatched()),
 #                  on expr+length and on expr+length+GC
 #   - matchRanges: nullranges propensity-rejection matching (only if 'nullranges'
 #                  is installed), on expr+length and expr+length+GC
@@ -39,9 +39,7 @@ runningScript <- normalizePath(sapply(strsplit(cArgs[fileArg], "--file="), "[", 
 # root one level up.
 repo_root <- dirname(dirname(runningScript))
 here <- function(f) file.path(repo_root, f)
-source(here("expressionMatched.R"))
-source(here("matchitMatched.R"))
-source(here("matchQC.R"))
+source(here("functions.R"))   # expressionMatched(), matchitMatched(), matchQC()
 
 if (!requireNamespace("MatchIt", quietly = TRUE)) {
   stop("benchmark_matchers.R needs the 'MatchIt' package; install.packages(\"MatchIt\").",

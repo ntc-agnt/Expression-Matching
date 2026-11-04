@@ -1,7 +1,7 @@
 # PRO-seq Expression Matching
 
 A command-line wrapper around Ben Martin's `expressionMatched()` function
-(`expressionMatched.R`), tailored for outputs from the NTC PRO-seq pipeline.
+(`functions.R`), tailored for outputs from the NTC PRO-seq pipeline.
 It uses **quantile matching** to build a control gene set whose expression
 distribution closely mirrors a target gene set of interest.
 
@@ -36,7 +36,7 @@ and:
    has a similar expression distribution to the target set.
 
 The matching itself (quantile binning + reproducible random sampling) is
-unchanged from the Adelman lab original; see `expressionMatched.R`.
+unchanged from the Adelman lab original; see `functions.R`.
 
 ## Requirements
 
@@ -140,7 +140,7 @@ significant, the matching is poor — see Troubleshooting.
 
 ## Interactive use of `expressionMatched()`
 
-The `expressionMatched()` function in `expressionMatched.R` can also be sourced
+The `expressionMatched()` function in `functions.R` can also be sourced
 and called directly in an interactive R session if you want full control over
 the matching parameters (`numQuantGroups`, `CtrlSetRatio`, `setSeedNum`). See
 the [Adelman lab's Expression-Matching
