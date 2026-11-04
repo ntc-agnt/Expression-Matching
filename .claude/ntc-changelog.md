@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-04 · claude/matchit-matcher
+- Add matchit_match.R: reusable flagged MatchIt matching workflow with a --covars spec (default expression; add length / any numeric GGA column / --covar-file column, with log2:/log10: transforms), sourcing covariates from makeHeatmap.rds + GGA WORKING_FILE + optional --covar-file, and emitting the full match-quality QC. Supersedes and removes the positional prototype main_matchit.R. Experimental branch, not merged; affects results: no
+
+## 2026-11-04 · claude/matchit-matcher
 - Add benchmark_matchers.R: synthetic stress-test suite comparing matchers (Expression / MatchIt / optional matchRanges) across confound scenarios, emitting a covariate-balance scorecard + per-scenario matchQC; matchQC.R gains density + ECDF views. Experimental branch, not merged; affects results: no
 
 ## 2026-11-03 · claude/matchit-matcher
