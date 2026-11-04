@@ -55,35 +55,65 @@ matchQC <- function(geneset, matchedset, dat, covars = NULL, all_genes = NULL,
             "matched set may not be a fair control on that covariate.")
   }
 
-  # --- distribution plots: one quantile panel per covariate ---
-  # Each panel shows the value at each quantile for the input genes (black) and
-  # the matched controls (red dashed); when the two curves overlie, the match is
-  # good. The grey "all genes" line shows the genome-wide background the controls
-  # are drawn from.
+  # --- distribution plots: quantile, density, and ECDF per covariate ---
+  # Each row is one covariate; the three views (value-by-quantile, kernel
+  # density, and cumulative distribution / ECDF) all compare the genes of
+  # interest (black) with the matched controls (red dashed), against all genes
+  # (grey) as the background. When the red and black curves overlie, that
+  # covariate is well matched; a gap from the grey curve shows the matched set
+  # is a targeted control rather than a random genome-wide sample.
   if (!capabilities("png")) {
     warning("no PNG device available; skipping distribution plots.", call. = FALSE)
     return(invisible(balance))
   }
   qg <- seq(0, 1, 0.02)
   qq <- function(v) stats::quantile(v, qg, na.rm = TRUE)
+  pal <- c(all = "grey70", input = "black", matched = "red2")
   png(paste0(out_prefix, "_QC.png"),
-      width = 540 * length(covar_cols), height = 540, res = 130)
+      width = 1500, height = 430 * length(covar_cols), res = 130)
   on.exit(grDevices::dev.off(), add = TRUE)
-  par(mfrow = c(1, length(covar_cols)), mar = c(4.2, 4.6, 3.2, 1))
+  par(mfrow = c(length(covar_cols), 3), mar = c(4.2, 4.6, 3.2, 1))
+  first <- TRUE
   for (col in covar_cols) {
     iv <- input_v[[col]]; mv <- matched_v[[col]]
     av <- if (!is.null(all_genes)) getv(all_genes, col) else NULL
+
+    # (1) value by quantile
     yl <- range(c(iv, mv, av), finite = TRUE)
-    plot(qg, qq(iv), type = "l", lwd = 2.6, col = "black", ylim = yl,
+    plot(qg, qq(iv), type = "l", lwd = 2.6, col = pal["input"], ylim = yl,
          xlab = "quantile", ylab = col,
-         main = sprintf("%s  (SMD = %+.3f)", col, bal[[col]]))
-    if (!is.null(av)) lines(qg, qq(av), lwd = 3, col = "grey70")
-    lines(qg, qq(iv), lwd = 2.6, col = "black")        # redraw input on top of grey
-    lines(qg, qq(mv), lwd = 2,   col = "red2", lty = 2)
-    legend("bottomright", bty = "n", lwd = 2, lty = c(1, 1, 2),
-           col = c("grey70", "black", "red2"),
-           legend = c("all genes", "genes of interest (input)", "matched control"),
-           cex = 0.85)
+         main = sprintf("%s  (SMD = %+.3f) - quantile", col, bal[[col]]))
+    if (!is.null(av)) lines(qg, qq(av), lwd = 3, col = pal["all"])
+    lines(qg, qq(iv), lwd = 2.6, col = pal["input"])     # redraw input on top of grey
+    lines(qg, qq(mv), lwd = 2,   col = pal["matched"], lty = 2)
+
+    # (2) kernel density (needs >= 2 finite values per set)
+    plot_density <- length(iv[is.finite(iv)]) >= 2 && length(mv[is.finite(mv)]) >= 2
+    if (plot_density) {
+      dI <- density(iv, na.rm = TRUE); dM <- density(mv, na.rm = TRUE)
+      dA <- if (!is.null(av) && length(av[is.finite(av)]) >= 2) density(av, na.rm = TRUE) else NULL
+      ym <- max(c(dI$y, dM$y, if (!is.null(dA)) dA$y))
+      plot(dI, col = pal["input"], lwd = 2.6, ylim = c(0, ym),
+           xlab = col, ylab = "density", main = paste0(col, " - density"))
+      if (!is.null(dA)) { polygon(dA, col = "grey92", border = NA); lines(dA, col = pal["all"], lwd = 3) }
+      lines(dI, col = pal["input"], lwd = 2.6)
+      lines(dM, col = pal["matched"], lwd = 2, lty = 2)
+    } else {
+      plot.new(); title(main = paste0(col, " - density (too few points)"))
+    }
+    if (first) legend("topright", bty = "n", lwd = 2, lty = c(1, 1, 2), col = pal,
+                      legend = c("all genes", "genes of interest (input)", "matched control"),
+                      cex = 0.8)
+
+    # (3) empirical cumulative distribution (ECDF)
+    plot(stats::ecdf(iv), col = pal["input"], lwd = 2.6, do.points = FALSE, verticals = TRUE,
+         xlab = col, ylab = "cumulative fraction", main = paste0(col, " - ECDF"))
+    if (!is.null(av)) plot(stats::ecdf(av), add = TRUE, col = pal["all"], lwd = 3,
+                           do.points = FALSE, verticals = TRUE)
+    plot(stats::ecdf(iv), add = TRUE, col = pal["input"], lwd = 2.6, do.points = FALSE, verticals = TRUE)
+    plot(stats::ecdf(mv), add = TRUE, col = pal["matched"], lwd = 2, lty = 2,
+         do.points = FALSE, verticals = TRUE)
+    first <- FALSE
   }
   invisible(balance)
 }
