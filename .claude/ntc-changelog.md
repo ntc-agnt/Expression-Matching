@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-04 · claude/matchit-matcher
+- matchit_match.R: add --method flag (default 'matchit'; 'expression'/'legacy' = original decile matcher, expression-only) so legacy control sets remain reproducible; outputs stamped with method (matched_controls.<method>.txt, run_info, QC) and shared QC exposes what legacy leaves unbalanced. Experimental branch, not merged; affects results: no
+
+## 2026-11-04 · claude/matchit-matcher
 - Add matchit_match.R: reusable flagged MatchIt matching workflow with a --covars spec (default expression; add length / any numeric GGA column / --covar-file column, with log2:/log10: transforms), sourcing covariates from makeHeatmap.rds + GGA WORKING_FILE + optional --covar-file, and emitting the full match-quality QC. Supersedes and removes the positional prototype main_matchit.R. Experimental branch, not merged; affects results: no
 
 ## 2026-11-04 · claude/matchit-matcher

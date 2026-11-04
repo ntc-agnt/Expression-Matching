@@ -7,6 +7,12 @@
 # list plus the full match-quality QC (per-covariate quantile/density/ECDF plots
 # and a standardized-mean-difference balance table).
 #
+# METHOD (--method, default "matchit"):
+#   matchit     nearest-neighbour Mahalanobis matching on the --covars (recommended)
+#   expression  legacy decile matcher (expressionMatched, expression-only, as the
+#               deployed main.R); alias "legacy". Kept for reproducing older control
+#               sets; ignores any covariates other than expression.
+#
 # COVARIATES (--covars, comma-separated; default "expression"):
 #   expression   length-normalized counts/kb (baseline condition), log2(x+1)   [from makeHeatmap.rds]
 #   length       gene length (DominantTES-TSS+1), log10                        [from GGA WORKING_FILE]
@@ -36,12 +42,13 @@ runningScript <- normalizePath(sapply(strsplit(cArgs[which(startsWith(cArgs, "--
 here <- function(f) sub("matchit_match.R", f, runningScript)
 source(here("matchitMatched.R"))
 source(here("matchQC.R"))
+source(here("expressionMatched.R"))   # legacy decile matcher (--method expression)
 `%||%` <- function(a, b) if (is.null(a)) b else a   # default for an unset flag
 
 ## --- flag parsing + validation ---
 usage <- paste(
   "Usage: Rscript matchit_match.R --genes FILE --deseq-dir DIR --gga FILE",
-  "--manifest FILE --baseline NAME [--window 0] [--covars expression]",
+  "--manifest FILE --baseline NAME [--method matchit] [--window 0] [--covars expression]",
   "[--covar-file FILE] [--ratio 1] [--outdir matchit_output]")
 argsArg <- which(startsWith(cArgs, "--args"))
 args <- if (length(argsArg)) cArgs[(argsArg + 1):length(cArgs)] else character(0)
@@ -67,6 +74,14 @@ window   <- suppressWarnings(as.numeric(opt[["window"]] %||% "0"))
 ratio    <- suppressWarnings(as.integer(opt[["ratio"]] %||% "1"))
 covspec  <- opt[["covars"]] %||% "expression"
 out_dir  <- opt[["outdir"]] %||% "matchit_output"
+# Matching algorithm: "matchit" (default) = nearest-neighbour Mahalanobis on the
+# --covars; "expression" (alias "legacy") = the original decile expressionMatched,
+# expression-only, matching the deployed main.R behaviour.
+method <- tolower(opt[["method"]] %||% "matchit")
+if (method == "legacy") method <- "expression"
+if (!method %in% c("matchit", "expression")) {
+  stop("--method must be 'matchit' (default) or 'expression'/'legacy'; got '", method, "'.", call. = FALSE)
+}
 if (is.na(window)) stop("--window must be numeric.", call. = FALSE)
 if (is.na(ratio) || ratio < 1) stop("--ratio must be an integer >= 1.", call. = FALSE)
 for (f in c(opt$genes, opt$gga, opt$manifest)) if (!file.exists(f)) stop("file not found: ", f, call. = FALSE)
@@ -133,15 +148,42 @@ resolved <- lapply(tokens, resolve_one)
 dat <- data.frame(GeneID = common, stringsAsFactors = FALSE, row.names = common)
 for (r in resolved) dat[[r$name]] <- as.numeric(r$value)
 covar_names <- vapply(resolved, function(x) x$name, character(1))
-message(sprintf("Matching on covariate(s): %s", paste(covar_names, collapse = ", ")))
 
-## --- match (nearest-neighbour Mahalanobis) and write the control list ---
-matched <- matchitMatched(genes_of_interest, pool, dat, covars = covar_names, ratio = ratio)
-out_list <- file.path(out_dir, "matched_controls.txt")
+## --- select the matched control set by the chosen method ---
+if (method == "matchit") {
+  message(sprintf("Method: matchit (nearest-neighbour Mahalanobis) on: %s",
+                  paste(covar_names, collapse = ", ")))
+  matched <- matchitMatched(genes_of_interest, pool, dat, covars = covar_names, ratio = ratio)
+} else {
+  # Legacy decile matcher: expression-only, 10 quantile groups, as in main.R.
+  if (!identical(covar_names, "expression")) {
+    message("NOTE: --method expression matches on expression ONLY; ignoring other ",
+            "covariate(s): ", paste(setdiff(covar_names, "expression"), collapse = ", "))
+  }
+  message("Method: expression (legacy decile expressionMatched, expression only)")
+  exp_dat <- data.frame(GeneID = common, Expression = as.numeric(counts_kb))  # raw counts/kb, as main.R
+  matched <- tryCatch(
+    unique(stats::na.omit(expressionMatched(genes_of_interest, pool, exp_dat, 10, setSeedNum = 1))),
+    error = function(e) stop("legacy expression matching failed (", conditionMessage(e),
+      "); a quantile bin likely has too few control genes - use --method matchit.", call. = FALSE))
+}
+
+## --- write the control list (filename stamped with the method for provenance) ---
+out_list <- file.path(out_dir, sprintf("matched_controls.%s.txt", method))
 writeLines(matched, out_list)
+writeLines(c(sprintf("method\t%s", method),
+             sprintf("covariates\t%s", if (method == "expression") "expression" else paste(covar_names, collapse = ",")),
+             sprintf("baseline\t%s", opt$baseline),
+             sprintf("n_genes_of_interest\t%d", length(genes_of_interest)),
+             sprintf("n_matched\t%d", length(matched)),
+             sprintf("generated\t%s", format(Sys.time()))),
+           file.path(out_dir, sprintf("run_info.%s.txt", method)))
 message(sprintf("Wrote %d matched control genes -> %s", length(matched), out_list))
 
 ## --- full match-quality QC (quantile/density/ECDF per covariate + balance table) ---
+# QC always runs on the requested covariates, so a legacy run visibly shows any
+# covariate (e.g. length) it left unbalanced.
+qc_prefix <- file.path(out_dir, sprintf("match_qc.%s", method))
 matchQC(genes_of_interest, matched, dat, covars = covar_names, all_genes = common,
-        out_prefix = file.path(out_dir, "match_qc"))
-message(sprintf("QC written to %s/ (match_qc_QC.png, match_qc_balance.txt).", out_dir))
+        out_prefix = qc_prefix)
+message(sprintf("QC written to %s_QC.png and %s_balance.txt", qc_prefix, qc_prefix))
