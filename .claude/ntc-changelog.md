@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-04 · main
+- Demote the legacy decile driver to archive/main.R (fixed its functions.R source path to the repo root). Updated README usage + overview. Algorithm/outputs unchanged. affects results: no
+
+## 2026-11-04 · main
 - Merge the function libraries into a single functions.R (expressionMatched, matchitMatched, matchQC); main.R, matchit_match.R and tests/benchmark_matchers.R now source it; removed expressionMatched.R / matchitMatched.R / matchQC.R. Resolves the matchit_match.R vs matchitMatched.R naming confusion. main.R change is the source path only; outputs identical. affects results: no
 
 ## 2026-11-04 · main

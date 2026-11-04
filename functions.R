@@ -3,11 +3,11 @@
 # Shared function library for the Expression-Matching tools. Everything the
 # drivers source lives here, in one place:
 #   expressionMatched()  original decile (quantile) expression matcher (legacy;
-#                         used by main.R and by matchit_match.R --method expression)
+#                         used by archive/main.R and by matchit_match.R --method expression)
 #   matchitMatched()     nearest-neighbour Mahalanobis covariate matcher (MatchIt)
 #   matchQC()            match-quality QC (balance table + distribution plots)
 #
-# Sourced by main.R, matchit_match.R, and tests/benchmark_matchers.R.
+# Sourced by archive/main.R, matchit_match.R, and tests/benchmark_matchers.R.
 
 ## ===========================================================================
 ## expressionMatched() - legacy decile expression matcher

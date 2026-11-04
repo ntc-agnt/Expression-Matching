@@ -7,9 +7,9 @@ distribution closely mirrors a target gene set of interest.
 
 ## Two matchers in this repo
 
-- **`main.R`** — the original decile expression matcher (documented below). Kept
-  as the frozen, deployed entry point; its outputs reproduce historical control
-  sets.
+- **`archive/main.R`** — the original decile expression matcher (documented
+  below). Archived as the frozen legacy driver; kept for reproducing historical
+  control sets. Run it as `Rscript archive/main.R ...`.
 - **`matchit_match.R`** — a newer, reusable workflow that matches on **expression
   and additional covariates** (e.g. gene **length**, GC) by nearest-neighbour
   Mahalanobis matching (`MatchIt`), and emits a full match-quality QC report
@@ -56,7 +56,7 @@ unchanged from the Adelman lab original; see `functions.R`.
 ```sh
 # Takes only a few seconds with minimal resources.
 # Argument order must be exactly as below.
-Rscript main.R \
+Rscript archive/main.R \
   gene_ensg.txt \
   path/to/DESeqOutput \
   path/to/GGA.WORKING_FILE.txt \

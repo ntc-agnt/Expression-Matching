@@ -5,7 +5,8 @@ fileArg <- which(startsWith(cArgs, "--file="))
 argsArg <- which(startsWith(cArgs, "--args"))
 runningScript <- normalizePath(sapply(strsplit(cArgs[fileArg], "--file="), "[", 2))
 
-source(sub("main.R", "functions.R", runningScript))
+# This legacy script lives in archive/; functions.R is in the repo root one level up.
+source(file.path(dirname(dirname(runningScript)), "functions.R"))
 
 p_thresh <- 0.1
 fc_thresh <- 1.3
