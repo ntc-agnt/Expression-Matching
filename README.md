@@ -19,6 +19,10 @@ distribution closely mirrors a target gene set of interest.
   unbalanced. See [Covariate matching workflow](#covariate-matching-workflow).
 - **`tests/`** — `benchmark_matchers.R` (a synthetic stress-test comparing the
   matchers) and `qc.R` (the legacy violin-plot QC).
+- **`examples/`** — `method_comparison_report.R`, a reproducible worked example
+  that compares all three matchers on a **real** DESeq2 dataset (across contrasts
+  and both up/down directions) and emits a multi-page PDF report + summary table.
+  See [`examples/README.md`](examples/README.md).
 
 ## How it works
 

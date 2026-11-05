@@ -13,6 +13,9 @@ Entry format (newest first):
 
 <!-- entries below, newest first -->
 
+## 2026-11-05 · claude/bold-cannon-bv332x
+- Add examples/method_comparison_report.R (+ examples/README.md): reproducible worked example comparing expressionMatched vs MatchIt(expr) vs MatchIt(expr+len) on a real DESeq2 dataset across contrasts and both up/down directions; emits summary_table.csv + multi-page PDF (summary, how-MatchIt-works explainer, joint expression×length mechanism figures, per-contrast ECDF panels). Uses the shared functions.R matchers; no change to library code. affects results: no
+
 ## 2026-11-04 · main
 - matchit_match.R: add a gene-list sanity guard - report how many --genes IDs are found in the annotation vs dropped, and stop with a clear message if <50% match (wrong ID type or stray header). affects results: no
 
