@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-05 · claude/bold-cannon-bv332x
+- Docs only: rewrote the top-level README around the current toolset (matchit_match.R recommended, functions.R, archive/main.R legacy, tests/, examples/) with example usage and a "Defining unchanged" section. Added a Decision note to examples/README.md recording that lessAbs was evaluated and set aside for control pools (power-dependent coverage bias breaks matching common-support; threshold is a user judgement) - the hard-cutoff definition with a user-set significance threshold is what the pipeline uses. No code change. affects results: no
+
+## 2026-11-05 · claude/bold-cannon-bv332x
 - Add two more example reports: examples/unchanged_definition_compare.R (head-to-head of the hard FC+padj cutoff vs DESeq2 lessAbs equivalence for defining the unchanged pool - sizes/overlap, covariate-bias ECDFs, downstream matcher length balance) and examples/matcher_pool_grid.R (full 3-matcher x 2-pool factorial per contrast as native joint expression x length scatter grids with MatchIt pair-links + matching length-ECDF grids + summary table). Both parameterized, reuse functions.R, no library change. affects results: no
 
 ## 2026-11-05 · claude/bold-cannon-bv332x

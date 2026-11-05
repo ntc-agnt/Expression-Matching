@@ -14,6 +14,37 @@ All three resolve `../functions.R` automatically (run them as files), take the
 same thresholds, and are dataset-agnostic — `--contrasts` is the only
 dataset-specific argument.
 
+## Decision: which "unchanged" definition the pipeline uses
+
+These reports evaluate two ways to **define the unchanged control pool**:
+
+- **hard cutoff** (`legacy`) — `padj > unch-padj` AND linear FC in `[1/unch-fc, unch-fc]`,
+  with the significance threshold set by the user;
+- **`lessAbs`** — DESeq2's equivalence test (`altHypothesis="lessAbs"`), which keeps
+  only genes the data can *prove* are unchanged.
+
+**Decision: the pipeline uses the hard cutoff with a user-chosen significance
+threshold; `lessAbs` is not used for building control pools.** Reasons, all
+documented by these scripts:
+
+1. `lessAbs` requires an equivalence margin (`lfcThreshold`), and that margin is a
+   design/judgement call — it cannot be read off the same data without circularity
+   (Love, [support.bioconductor.org/p/108749](https://support.bioconductor.org/p/108749/);
+   Lakens' "smallest effect size of interest"). So it does not remove the need for
+   a user-set threshold; it just moves it.
+2. Proving equivalence needs statistical power, which scales with read count, so the
+   `lessAbs` pool is biased toward **longer, higher-expressed genes**. That breaks the
+   **common-support** nearest-neighbour matching relies on (the "off-support" failure:
+   ~10% of inputs have no nearby control, and even `MatchIt(expr+len)` then produces a
+   biased, off-support control band) — see `unchanged_definition_compare.R` and
+   `matcher_pool_grid.R`.
+3. The hard-cutoff band (≈ 1.3×) sits right at the measured replicate **noise floor**
+   of this assay, so it was never arbitrary; it is "within what the data calls noise."
+
+The `lessAbs` machinery is **kept in these examples as the rationale** for the choice
+(`--unch-method lessabs`, `--sensitivity`, and `unchanged_definition_compare.R`); it is
+not a default and the production workflow (`matchit_match.R`) never uses it.
+
 ## `method_comparison_report.R`
 
 Compares the three control-gene matchers in `functions.R`, writes a multi-page

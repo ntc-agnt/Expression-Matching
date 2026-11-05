@@ -1,214 +1,195 @@
-# PRO-seq Expression Matching
+# PRO-seq Control-Gene Matching
 
-A command-line wrapper around Ben Martin's `expressionMatched()` function
-(`functions.R`), tailored for outputs from the NTC PRO-seq pipeline.
-It uses **quantile matching** to build a control gene set whose expression
-distribution closely mirrors a target gene set of interest.
+Build a **control / background gene set** that is matched to a set of genes of
+interest (e.g. up-regulated genes), for PRO-seq differential-expression analyses.
+Controls are drawn from genes that are **unchanged** across the experiment and are
+**matched to the query set's covariate distribution** — expression, and optionally
+gene length and other covariates — so that downstream comparisons are not confounded
+by those covariates.
 
-## Two matchers in this repo
+Expression-only matching leaves **gene length** (a real PRO-seq confounder)
+unbalanced; the recommended workflow matches on expression **and** length jointly.
 
-- **`archive/main.R`** — the original decile expression matcher (documented
-  below). Archived as the frozen legacy driver; kept for reproducing historical
-  control sets. Run it as `Rscript archive/main.R ...`.
-- **`matchit_match.R`** — a newer, reusable workflow that matches on **expression
-  and additional covariates** (e.g. gene **length**, GC) by nearest-neighbour
-  Mahalanobis matching (`MatchIt`), and emits a full match-quality QC report
-  (balance table + per-covariate quantile/density/ECDF plots). It can also run
-  the legacy algorithm via `--method expression`. **Recommended for new work**,
-  since expression-only matching leaves gene length (a PRO-seq confounder)
-  unbalanced. See [Covariate matching workflow](#covariate-matching-workflow).
-- **`tests/`** — `benchmark_matchers.R` (a synthetic stress-test comparing the
-  matchers) and `qc.R` (the legacy violin-plot QC).
-- **`examples/`** — reproducible worked examples on a **real** DESeq2 dataset:
-  `method_comparison_report.R` (which matcher balances best),
-  `unchanged_definition_compare.R` (hard FC+padj cutoff vs DESeq2 `lessAbs`
-  equivalence for defining the unchanged pool), and `matcher_pool_grid.R` (the
-  full 3 matchers × 2 pool-definitions factorial, with native MatchIt pair-link
-  scatter grids). See [`examples/README.md`](examples/README.md).
+---
+
+## Tools in this repo
+
+| Path | What it is |
+|------|------------|
+| **`matchit_match.R`** | **Recommended workflow.** Flagged CLI that selects controls by 1:1 nearest-neighbour Mahalanobis matching (`MatchIt`) on one or more covariates (expression, length, GC, …) and writes a full match-quality QC. Can also run the legacy expression-only algorithm. |
+| `functions.R` | The library: `expressionMatched()` (legacy decile matcher), `matchitMatched()` (covariate matcher), `matchQC()` (balance table + plots). Sourced by the drivers; usable interactively. |
+| `archive/main.R` | **Legacy** decile expression-matching driver (frozen, positional args). Kept for reproducing historical control sets. |
+| `tests/` | `benchmark_matchers.R` (synthetic stress-test comparing matchers) and `qc.R` (legacy violin QC). |
+| `examples/` | Reproducible reports on a **real** DESeq2 dataset comparing matchers and unchanged-pool definitions. See [`examples/README.md`](examples/README.md). |
+
+---
 
 ## How it works
 
-`main.R` takes a list of genes of interest plus standard NTC pipeline outputs
-and:
+For a supplied list of genes of interest, the matcher:
 
-1. Identifies **unchanged** (non-differentially-expressed) genes from the DESeq2
-   results.
-2. Restricts those control candidates to **protein-coding genes ≥ 1 kb** using
-   the GGA annotation.
-3. Computes a **length-normalized expression value** (counts/kb) for every gene
-   from the baseline condition.
-4. Runs `expressionMatched()` to draw, for each expression quantile of the
-   target set, a matching number of control genes — so the returned control set
-   has a similar expression distribution to the target set.
+1. **Defines the unchanged pool** — genes that are *not* differentially expressed in
+   **every** contrast (`padj > 0.1` **and** linear fold change within `[1/1.3, 1.3]`),
+   restricted to **protein-coding** genes **≥ 1 kb**. Those two thresholds are set as
+   constants near the top of the script (`p_thresh`, `fc_thresh`) and encode a
+   judgement about what counts as "unchanged" (see *Defining "unchanged"* below). Your
+   genes of interest are supplied by you and are not subjected to these filters.
+2. **Computes per-gene covariates** from the **baseline** condition — length-normalized
+   expression (counts/kb, `log2`), gene length (`log10`), plus any extra numeric
+   covariates you provide.
+3. **Selects matched controls** from the unchanged pool, 1:1 to the query set, by
+   nearest-neighbour Mahalanobis matching on the chosen covariates (or, in legacy mode,
+   by decile expression matching).
+4. **Writes the matched list(s) and a match-quality QC** — a standardized-mean-difference
+   (SMD) balance table (`|SMD| < 0.1` = balanced) and per-covariate distribution plots.
 
-The matching itself (quantile binning + reproducible random sampling) is
-unchanged from the Adelman lab original; see `functions.R`.
+---
 
 ## Requirements
 
-- R (version ≥ 4.x recommended)
-- A plain-text file with a **single column of gene IDs of interest** (e.g.
-  upregulated genes), one ENSG ID per line
-- **DESeq2 outputs** from the NTC pipeline:
-  - per-contrast `*_results_table.txt` files (under `<DESeqOutput>/*/`)
-  - a `matrix/*.makeHeatmap.rds` count matrix
-- A **GGA `WORKING_FILE`** annotation table
-- A tab-delimited **DESeq2 sample manifest** containing a `condition` column
-- Optional (for QC violin plots): the `vioplot` R package. If it is not
-  installed, QC falls back to base-R box plots automatically.
+- **R ≥ 4.x**
+- **`MatchIt`** (CRAN) — for the covariate matcher.
+- **`DESeq2`** (Bioconductor) — only for the `examples/` reports, not for the matcher.
+- Optional: `vioplot` (legacy violin QC; falls back to base-R box plots if absent).
 
-## Usage
+Inputs (NTC PRO-seq pipeline outputs):
+
+- a plain-text file of **gene IDs of interest**, one per line;
+- **DESeq2 outputs**: per-contrast `*_results_table.txt` files and a
+  `matrix/*.makeHeatmap.rds` count matrix;
+- a **GGA `WORKING_FILE`** annotation (provides `GeneType`, `GeneName`,
+  `DominantTSS`/`DominantTES`; gene length = `|DominantTES − DominantTSS| + 1`);
+- a tab-delimited **DESeq2 sample manifest** with a `condition` column.
+
+---
+
+## Quick start (recommended workflow)
 
 ```sh
-# Takes only a few seconds with minimal resources.
-# Argument order must be exactly as below.
+Rscript matchit_match.R \
+  --genes      genes_of_interest.txt \
+  --deseq-dir  DESeqOutput/ \
+  --gga        GGA.WORKING_FILE.txt \
+  --manifest   DESeq_manifest.txt \
+  --baseline   WT \
+  --covars     expression,length \
+  --outdir     matchit_output
+```
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--genes` | — | 1-column file of gene IDs of interest (e.g. up-regulated genes). |
+| `--deseq-dir` | — | DESeq2 output folder (globbed for `*/*_results_table.txt` and `matrix/*.makeHeatmap.rds`). |
+| `--gga` | — | GGA `WORKING_FILE` annotation. |
+| `--manifest` | — | Tab-delimited DESeq2 manifest with a `condition` column. |
+| `--baseline` | — | `condition` value whose samples define the baseline expression (normally the control/WT). |
+| `--covars` | `expression` | Comma-separated covariates to match on (see below). |
+| `--covar-file` | — | Optional `GeneID` + numeric columns table (e.g. precomputed GC). |
+| `--method` | `matchit` | `matchit` = Mahalanobis covariate matching; `expression`/`legacy` = decile expression-only (reproduces old control sets). |
+| `--window` | `0` | bp subtracted from each gene's length in the counts/kb normalization. |
+| `--ratio` | `1` | Controls per gene of interest. |
+| `--outdir` | `matchit_output` | Output directory. |
+
+**`--covars`** accepts the keywords `expression` (counts/kb, `log2`) and `length`
+(`log10`), any numeric **GGA WORKING_FILE** column by name, and any column of
+`--covar-file`; prefix with `log2:`/`log10:` to transform. To add GC, supply it via
+`--covar-file` and pass `--covars expression,length,gc` — the Mahalanobis distance
+generalizes to any number of numeric covariates.
+
+**Outputs** (to `--outdir`, stamped with the method): `matched_controls.<method>.txt`,
+`run_info.<method>.txt`, and `match_qc.<method>_QC.png` / `_balance.txt` (the SMD
+balance table and per-covariate quantile/density/ECDF plots).
+
+---
+
+## Defining "unchanged"
+
+The control pool is the set of genes called **unchanged** across all contrasts. Two
+ways to define that were evaluated:
+
+- **hard cutoff (used):** `padj > p_thresh` **and** linear fold change within a small
+  band `[1/fc_thresh, fc_thresh]`, defaulting to `p_thresh = 0.1` and `fc_thresh = 1.3`
+  (set as constants at the top of `matchit_match.R` / `archive/main.R`). Choosing these
+  is a **user judgement** — the biologically meaningful "no change" effect size — which
+  is the methodologically correct way to set it (there is no non-circular way to derive
+  it from the same data). For this assay the `1.3×` band also sits at the measured
+  replicate **noise floor**, so the default is not arbitrary. Change the definition by
+  editing those two constants.
+- **`lessAbs` equivalence (evaluated, not used):** DESeq2's equivalence test. Rigorous for
+  *stating* that genes are unchanged, but its power-dependence biases the pool toward
+  long / high-expression genes and breaks the common support that nearest-neighbour
+  matching needs. See the decision note and comparison reports in
+  [`examples/`](examples/README.md).
+
+Either way, **matching on the covariates (expression + length) is what controls the
+confounders** — so an inclusive, user-thresholded unchanged pool is the right input.
+
+---
+
+## Match-quality QC
+
+Every run writes the QC automatically. Read it as:
+
+- **Balance table (`_balance.txt`):** standardized mean difference (SMD) between the
+  matched controls and the query set for each covariate. **`|SMD| ≤ 0.1` = balanced.**
+  Expression-only matching typically shows a balanced expression SMD but an imbalanced
+  length SMD; joint `expression + length` matching balances both.
+- **Distribution plots (`_QC.png`):** per-covariate quantile / density / ECDF curves for
+  all genes, the query set, and the matched controls — the matched curve should sit on
+  the query curve.
+
+---
+
+## Legacy decile matcher (`archive/main.R`)
+
+Frozen, positional-argument driver for the original expression-only decile matcher; kept
+for reproducing historical control sets.
+
+```sh
 Rscript archive/main.R \
-  gene_ensg.txt \
-  path/to/DESeqOutput \
-  path/to/GGA.WORKING_FILE.txt \
-  <window> \
-  path/to/DESeq_metadata.txt \
-  <baseline condition name>
+  genes_ensg.txt  DESeqOutput/  GGA.WORKING_FILE.txt  <window>  DESeq_manifest.txt  <baseline>
 ```
 
-### Required arguments (in order)
+It writes three replicate control lists (seeds 1–3) plus a violin-plot QC per seed. The
+three lists are independent random draws with the same intended properties; inspecting
+all three checks that the matching is robust to the draw. The same decile algorithm is
+available in the recommended workflow via `matchit_match.R --method expression`.
 
-| Arg # | Example | Description |
-|-------|---------|-------------|
-| 1 | `gene_ensg.txt` | 1-column `.txt` of ENSG IDs for the genes of interest (e.g. up- or down-regulated genes) |
-| 2 | `DESeqOutput/` | Path to the DESeq2 output folder (globbed for `*/*_results_table.txt` and `matrix/*.makeHeatmap.rds`) |
-| 3 | `gga_WORKING_FILE.tsv` | Path to the GGA file with `WORKING_FILE` in its name (currently requires GGA-style annotation) |
-| 4 | `<window>` | Integer bp subtracted from each gene's TSS–TES length when computing length-normalized expression (e.g. `0` matches on TSS→TES; `250` matches on +250→TES) |
-| 5 | `DESeq_metadata.txt` | Tab-delimited DESeq2 sample manifest; must include a `condition` column |
-| 6 | `<baseline condition>` | A value from the manifest's `condition` column whose samples are used as the baseline for expression matching (normally the WT/control, to avoid matching on a perturbed condition) |
+**Decile starvation:** if a run errors with *"cannot take a sample larger than the
+population when 'replace = FALSE'"*, the unchanged pool is too thin in some expression
+decile to fill the draw. Lower the number of quantile groups or the control ratio — or
+use the Mahalanobis matcher (`--method matchit`), which degrades gracefully instead of
+failing.
 
-## Output
+---
 
-For each of three random seeds (1, 2, 3), `main.R` writes:
+## Examples and benchmarks
 
-- `expression_matched-<baseline condition>_<seed>.txt` — the matched control
-  gene list (one gene ID per line).
-- `expression_matched-<baseline condition>_<seed>_QC.txt` — a QC report (see
-  below).
-- `expression_matched-<baseline condition>_<seed>_violin.png` — a QC violin
-  plot (see below).
+- [`examples/`](examples/README.md) — reproducible reports on a real DESeq2 dataset:
+  `method_comparison_report.R` (which matcher balances best), `matcher_pool_grid.R` (the
+  full matcher × unchanged-pool grid with native MatchIt pair-link scatter views), and
+  `unchanged_definition_compare.R` (hard cutoff vs `lessAbs`). They are the rationale
+  behind the design choices above.
+- `tests/benchmark_matchers.R` — stress-tests the matchers against synthetic confound
+  scenarios and writes a covariate-balance scorecard.
 
-The three lists are **replicates**: independent random draws produced with
-different seeds. Each list has the *same* intended properties — it is (1) not
-differentially expressed, (2) approximately the same size as the input set, and
-(3) matched to the target set's distribution of length-normalized expression.
-Generating three lets you check that the matching is robust to the random draw;
-it is suggested to inspect all three. Downstream analysis typically subsets
-matrix files using the returned gene lists.
+---
 
-## QC workflow
+## Interactive use
 
-The QC step is adapted from the Adelman lab README and runs automatically for
-each seed (implemented in `qc.R`). For each matched list it compares three gene
-sets — **control** (all candidate unchanged genes), **target** (your genes of
-interest), and **expression-matched** (the drawn control subset) — using their
-length-normalized expression values:
+`functions.R` can be sourced directly. `matchitMatched(geneset, ctrlgeneset, dat,
+covars, ratio)` returns matched control IDs from a covariate frame; `expressionMatched()`
+is the legacy decile matcher; `matchQC()` writes the balance table and plots. See the
+[Adelman lab Expression-Matching README](https://github.com/AdelmanLab/Expression-Matching)
+for the original function documentation and a simulated example.
 
-- **Summary statistics** (`summary()`) for each of the three sets.
-- **Mann-Whitney / Wilcoxon rank-sum tests**:
-  - control vs. target — typically *significant* (the full control set is not
-    expression-matched), and
-  - expression-matched vs. target — ideally *not significant* (a well-matched
-    set should be statistically indistinguishable from the target).
-- A **violin plot** of `log2` expression for control, expression-matched, and
-  target sets, saved as a PNG.
-
-Interpreting the QC: good matching looks like a non-significant
-expression-matched-vs-target test and overlapping violins/summaries for the
-expression-matched and target sets. If the expression-matched-vs-target test is
-significant, the matching is poor — see Troubleshooting.
-
-## Additional details
-
-- **Unchanged-gene thresholds** (hardcoded in `main.R` as `p_thresh` and
-  `fc_thresh`): `padj > 0.1` **and** fold change within `[1/1.3, 1.3]` (i.e. the
-  linear fold-change column, not log2). A gene must satisfy this in **every**
-  contrast (intersection across all `*_results_table.txt` files). Note: the
-  thresholds are applied to fixed result-table **columns** (column 6 = `padj`,
-  column 7 = fold change), so the DESeq2 tables must follow that column order.
-- **Control-gene filtering:** control candidates are further restricted to
-  `GeneType == "protein_coding"` and to genes whose annotated length
-  (`DominantTES − DominantTSS + 1`) is **≥ 1 kb**. This length filter uses the
-  full gene length and is **independent of the `<window>` argument** (the window
-  only affects the counts/kb normalization). The **genes of interest are used as
-  supplied** and are *not* subjected to the protein-coding or length filters.
-- **Expression values:** mean length-normalized counts/kb across the baseline
-  condition's replicates, taken from the `makeHeatmap.rds` matrix and divided by
-  `(gene length + 1 − <window>) / 1000`.
-- **Quantile groups:** 10, set in the `expressionMatched()` call in `main.R`.
-  Adjustable only by editing the script.
-- **Replicates:** 3 seeds (1, 2, 3).
-
-## Interactive use of `expressionMatched()`
-
-The `expressionMatched()` function in `functions.R` can also be sourced
-and called directly in an interactive R session if you want full control over
-the matching parameters (`numQuantGroups`, `CtrlSetRatio`, `setSeedNum`). See
-the [Adelman lab's Expression-Matching
-README](https://github.com/AdelmanLab/Expression-Matching) for the detailed
-function documentation and a self-contained simulated example.
-
-## Troubleshooting
-
-If matching fails with an error such as:
-
-```
-Error in sample.int(length(x), size, replace, prob) :
-  cannot take a sample larger than the population when 'replace = FALSE'
-```
-
-your control set does not contain enough genes to cover every expression
-quantile of the target set. Reduce the number of quantile groups
-(`numQuantGroups`, in the `expressionMatched()` call in `main.R`), or lower the
-control-set ratio (`CtrlSetRatio`) when calling `expressionMatched()` directly.
-
-## Customization (make your own clone/copy of the script)
-
-- Change thresholds, quantile-group count, or seed count by editing `main.R`.
-- Adapt the column mappings if using non-standard gene annotations or DESeq2
-  table layouts.
-
-## Covariate matching workflow
-
-`matchit_match.R` generalizes the matcher: it selects controls by 1:1
-nearest-neighbour Mahalanobis matching (`MatchIt`) on **one or more covariates**,
-and always writes the full match-quality QC. Expression-only matching leaves gene
-length unbalanced (a real PRO-seq confounder), which joint matching fixes.
-
-```
-Rscript matchit_match.R --genes genes.txt --deseq-dir DESeqOutputDir \
-  --gga GGA.WORKING_FILE.txt --manifest DESeq_manifest.txt --baseline WT \
-  [--method matchit] [--covars expression,length] [--covar-file extra.txt] \
-  [--window 0] [--ratio 1] [--outdir matchit_output]
-```
-
-- **`--covars`** (default `expression`): comma-separated covariates. Keywords
-  `expression` (counts/kb, log2) and `length` (log10); any numeric **GGA
-  WORKING_FILE** column by name; any column of an optional **`--covar-file`**
-  (`GeneID` + numeric columns, e.g. precomputed GC); `log2:`/`log10:` prefixes
-  transform GGA/file covariates. Covariate sources: `makeHeatmap.rds`
-  (expression) → GGA WORKING_FILE (length + its columns) → `--covar-file`.
-- **`--method`** (default `matchit`): `expression`/`legacy` runs the original
-  decile matcher (expression only) for reproducing older control sets.
-- **Outputs** (to `--outdir`, stamped with the method): `matched_controls.*.txt`,
-  `run_info.*.txt`, and `match_qc.*_QC.png` / `_balance.txt` (per-covariate
-  quantile + density + ECDF plots and a standardized-mean-difference table;
-  `|SMD| < 0.1` = balanced).
-- Requires the CRAN package `MatchIt`.
-
-`tests/benchmark_matchers.R` stress-tests the matchers against synthetic
-confound scenarios and writes a covariate-balance scorecard.
+---
 
 ## Credit
 
 - **Expression-matching algorithm:** Benjamin J. E. Martin (Karen Adelman Lab) —
-  see <https://github.com/AdelmanLab/Expression-Matching>.
-- **NTC PRO-seq wrapper (`main.R`):** Geoff Nelson.
-- **Covariate matching workflow (`matchit_match.R`):** nearest-neighbour
-  covariate matching via MatchIt (Ho, Imai, King & Stuart).
+  <https://github.com/AdelmanLab/Expression-Matching>.
+- **NTC PRO-seq wrapper (legacy `main.R`):** Geoff Nelson.
+- **Covariate matching workflow (`matchit_match.R`):** nearest-neighbour matching via
+  `MatchIt` (Ho, Imai, King & Stuart).
 - **QC workflow:** adapted from the Adelman lab README.
