@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-05 · claude/bold-cannon-bv332x
+- Add two more example reports: examples/unchanged_definition_compare.R (head-to-head of the hard FC+padj cutoff vs DESeq2 lessAbs equivalence for defining the unchanged pool - sizes/overlap, covariate-bias ECDFs, downstream matcher length balance) and examples/matcher_pool_grid.R (full 3-matcher x 2-pool factorial per contrast as native joint expression x length scatter grids with MatchIt pair-links + matching length-ECDF grids + summary table). Both parameterized, reuse functions.R, no library change. affects results: no
+
+## 2026-11-05 · claude/bold-cannon-bv332x
 - method_comparison_report.R: add an unchanged-pool definition axis - --unch-method legacy|lessabs (DESeq2 lessAbs equivalence test, compatible with contrast=) and --sensitivity to run both and append a comparison section + sensitivity_table.csv. lessAbs is treated as a pool definition, not a matcher. Finding (documented, not a code change): the lessAbs pool is length-biased (equivalence needs power -> favours longer genes), so expression-only matching degrades under it while MatchIt(expr+len) stays best. No change to library code. affects results: no
 
 ## 2026-11-05 · claude/bold-cannon-bv332x

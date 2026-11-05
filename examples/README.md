@@ -1,9 +1,23 @@
-# Worked example — matcher comparison on a real DESeq2 dataset
+# Worked examples — matcher & pool comparisons on a real DESeq2 dataset
 
-`method_comparison_report.R` compares the three control-gene matchers shipped in
-this repo's `functions.R`, on a **real** DESeq2 dataset, and writes a multi-page
-PDF report plus a summary table. It is the reproducible version of the analysis
-behind the method-comparison report.
+Reproducible reports that compare the control-gene matchers in this repo's
+`functions.R` on a **real** DESeq2 dataset. Three scripts, all sharing the same
+inputs (`--dds`, `--gga`, `--contrasts`) and conventions:
+
+| Script | Question it answers |
+|--------|---------------------|
+| `method_comparison_report.R`        | Which **matcher** balances covariates best? (expressionMatched vs MatchIt expr vs MatchIt expr+len) |
+| `unchanged_definition_compare.R`    | Which **unchanged-pool definition** should we use? (hard FC+padj cutoff vs DESeq2 `lessAbs` equivalence) |
+| `matcher_pool_grid.R`               | The **full factorial**: 3 matchers × 2 pool definitions, visualized natively per contrast |
+
+All three resolve `../functions.R` automatically (run them as files), take the
+same thresholds, and are dataset-agnostic — `--contrasts` is the only
+dataset-specific argument.
+
+## `method_comparison_report.R`
+
+Compares the three control-gene matchers in `functions.R`, writes a multi-page
+PDF report plus a summary table. The reproducible version of the matcher report.
 
 The three matchers, all drawing controls from the **same** unchanged-gene pool:
 
@@ -139,3 +153,50 @@ Rscript examples/method_comparison_report.R \
   the covariate frame and pass it through `matchitMatched(..., covars = c("expr",
   "loglen", "gc"))`; the Mahalanobis distance generalizes to any number of
   numeric covariates.
+
+## `unchanged_definition_compare.R`
+
+Head-to-head of the two ways to **define** the unchanged control pool, rather
+than which matcher to use:
+
+- `legacy` — hard cutoff: `padj > unch-padj` AND linear FC in `[1/unch-fc, unch-fc]`
+  ("not significant AND inside a band").
+- `lessAbs` — DESeq2's equivalence test
+  (`results(lfcThreshold=log2(unch-fc), altHypothesis="lessAbs")`, `padj <= lessabs-alpha`):
+  genes the data can **prove** are inside the band.
+
+```bash
+Rscript examples/unchanged_definition_compare.R \
+  --dds path/to/deseq.dds.rds --gga path/to/GGA_WORKING_FILE.txt \
+  --contrasts "sto1/dmso,siTTF2/ctrl_002,tam/ctrl_003" \
+  --out unchanged_compare_output
+```
+
+Outputs `pool_comparison.csv`, `downstream_length_balance.csv`, and a 4-page PDF:
+(1) set sizes, overlap and covariate composition of each pool; (2–3) pool
+expression/length ECDFs vs all-eligible genes; (4) the length balance each
+matcher achieves from each pool. **Finding:** the two sets overlap heavily but
+aren't nested — `lessAbs` is statistically cleaner (only provably-unchanged
+genes) but, because proving equivalence needs power (which scales with gene
+length/expression), its pool is biased toward **longer, higher-expressed** genes.
+So it's a less representative background, and expression-only matching gets worse
+drawing from it.
+
+## `matcher_pool_grid.R`
+
+The full factorial, visualized natively. For each contrast it draws a **3×2 grid**
+of the joint expression × length scatter — rows = pool definition (legacy top,
+lessAbs bottom), columns = matcher (expMat, MatchIt:expr, MatchIt:expr+len), with
+MatchIt shown using its native **pair-links** — and a matching **3×2 grid of
+gene-length ECDFs**. Page 1 is an overall length-balance summary table.
+
+```bash
+Rscript examples/matcher_pool_grid.R \
+  --dds path/to/deseq.dds.rds --gga path/to/GGA_WORKING_FILE.txt \
+  --contrasts "sto1/dmso,siTTF2/ctrl_002,tam/ctrl_003" \
+  --dir up --out matcher_pool_grid_output
+```
+
+Use `--dir up|dn` to pick the direction shown in the grids (summary table always
+covers both); `--bg N` controls how many background genes are drawn in each
+scatter (lower it to shrink the PDF). Outputs `grid_summary.csv` and the PDF.

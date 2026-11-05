@@ -19,10 +19,12 @@ distribution closely mirrors a target gene set of interest.
   unbalanced. See [Covariate matching workflow](#covariate-matching-workflow).
 - **`tests/`** — `benchmark_matchers.R` (a synthetic stress-test comparing the
   matchers) and `qc.R` (the legacy violin-plot QC).
-- **`examples/`** — `method_comparison_report.R`, a reproducible worked example
-  that compares all three matchers on a **real** DESeq2 dataset (across contrasts
-  and both up/down directions) and emits a multi-page PDF report + summary table.
-  See [`examples/README.md`](examples/README.md).
+- **`examples/`** — reproducible worked examples on a **real** DESeq2 dataset:
+  `method_comparison_report.R` (which matcher balances best),
+  `unchanged_definition_compare.R` (hard FC+padj cutoff vs DESeq2 `lessAbs`
+  equivalence for defining the unchanged pool), and `matcher_pool_grid.R` (the
+  full 3 matchers × 2 pool-definitions factorial, with native MatchIt pair-link
+  scatter grids). See [`examples/README.md`](examples/README.md).
 
 ## How it works
 
