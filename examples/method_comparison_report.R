@@ -10,11 +10,16 @@
 #   * MatchIt (expr)             - nearest-neighbour Mahalanobis, expression only
 #   * MatchIt (expr+len)         - nearest-neighbour Mahalanobis, expression + gene length
 #
-# For every contrast and both directions (Up / Dn) it reports how well each
-# matcher balances expression and gene length (standardized mean difference,
-# |SMD| <= 0.1 = balanced), and it draws the joint expression x length "mechanism"
-# view that shows what MatchIt actually does (which pool gene each input gene is
-# paired with). See examples/README.md for full usage.
+# These are MATCHERS (they SELECT controls from a pool). Separately, the pool of
+# "unchanged" genes can be DEFINED two ways (an orthogonal axis, not a matcher):
+#   * legacy  - not significant AND within a fold-change band
+#               (padj > unch-padj AND linear FC in [1/unch-fc, unch-fc])
+#   * lessabs - DESeq2's built-in equivalence test
+#               results(dds, lfcThreshold=log2(unch-fc), altHypothesis="lessAbs");
+#               genes with padj <= lessabs-alpha are CONFIDENTLY within the band.
+# Choose the pool for the main report with --unch-method; add --sensitivity to run
+# the whole comparison under BOTH pool definitions and append a sensitivity section
+# (pool sizes + whether the balance / FAILED conclusions hold). See examples/README.md.
 #
 # Inputs (flags):
 #   --dds  FILE   a DESeq2 DESeqDataSet saved with saveRDS() (must have a
@@ -26,9 +31,14 @@
 #                 is used as the matching covariate.
 #   --out  DIR    output directory (default: matching_report_output).
 #   --mech        which contrast drives the mechanism pages (default: last one).
+#   --unch-method legacy|lessabs   pool definition for the main report (default legacy).
+#   --sensitivity                  also run both pool definitions and append the
+#                                  sensitivity comparison (section + sensitivity_table.csv).
+#   --lessabs-alpha 0.1            padj cutoff for the lessAbs equivalence call.
 # Thresholds (flags, with defaults matching the repo's conventions):
 #   --up-fc 1.5  --padj 0.01            (differential call: |linear FC| and padj)
-#   --unch-fc 1.3  --unch-padj 0.1      (unchanged pool: linear FC band and padj)
+#   --unch-fc 1.3  --unch-padj 0.1      (unchanged pool: linear FC band and padj;
+#                                        unch-fc also sets the lessAbs equivalence bound)
 #   --min-len 1000  --genetype protein_coding  --deciles 10
 # -----------------------------------------------------------------------------
 
@@ -45,8 +55,10 @@ source(file.path(repo_root, "functions.R"))   # expressionMatched(), matchitMatc
 usage <- paste(
   "Usage: Rscript examples/method_comparison_report.R --dds FILE --gga FILE",
   "--contrasts num/den[,num/den...] [--out DIR] [--mech num/den]",
+  "[--unch-method legacy|lessabs] [--sensitivity] [--lessabs-alpha 0.1]",
   "[--up-fc 1.5] [--padj 0.01] [--unch-fc 1.3] [--unch-padj 0.1]",
   "[--min-len 1000] [--genetype protein_coding] [--deciles 10]")
+bool_flags <- c("help", "sensitivity")
 argsArg <- which(startsWith(cArgs, "--args"))
 args <- if (length(argsArg)) cArgs[(argsArg + 1):length(cArgs)] else character(0)
 parse_flags <- function(a) {
@@ -54,7 +66,7 @@ parse_flags <- function(a) {
   while (i <= length(a)) {
     if (!startsWith(a[i], "--")) stop("unexpected argument '", a[i], "'.\n", usage, call. = FALSE)
     key <- sub("^--", "", a[i])
-    if (key == "help") { out$help <- TRUE; i <- i + 1; next }
+    if (key %in% bool_flags) { out[[key]] <- TRUE; i <- i + 1; next }
     if (i == length(a)) stop("missing value for --", key, ".\n", usage, call. = FALSE)
     out[[key]] <- a[i + 1]; i <- i + 2
   }
@@ -69,15 +81,20 @@ if (length(missing_req)) stop("missing required argument(s): --",
                               paste(missing_req, collapse = ", --"), "\n", usage, call. = FALSE)
 for (f in c(opt$dds, opt$gga)) if (!file.exists(f)) stop("file not found: ", f, call. = FALSE)
 
-out_dir     <- opt[["out"]] %||% "matching_report_output"
-up_fc       <- as.numeric(opt[["up-fc"]]     %||% "1.5")
-padj_de     <- as.numeric(opt[["padj"]]      %||% "0.01")
-unch_fc     <- as.numeric(opt[["unch-fc"]]   %||% "1.3")
-unch_padj   <- as.numeric(opt[["unch-padj"]] %||% "0.1")
-min_len     <- as.numeric(opt[["min-len"]]   %||% "1000")
-gene_type   <- opt[["genetype"]] %||% "protein_coding"
-deciles     <- as.integer(opt[["deciles"]]   %||% "10")
-lfc_up      <- log2(up_fc)
+out_dir       <- opt[["out"]] %||% "matching_report_output"
+up_fc         <- as.numeric(opt[["up-fc"]]     %||% "1.5")
+padj_de       <- as.numeric(opt[["padj"]]      %||% "0.01")
+unch_fc       <- as.numeric(opt[["unch-fc"]]   %||% "1.3")
+unch_padj     <- as.numeric(opt[["unch-padj"]] %||% "0.1")
+min_len       <- as.numeric(opt[["min-len"]]   %||% "1000")
+gene_type     <- opt[["genetype"]] %||% "protein_coding"
+deciles       <- as.integer(opt[["deciles"]]   %||% "10")
+lessabs_alpha <- as.numeric(opt[["lessabs-alpha"]] %||% "0.1")
+unch_main     <- tolower(opt[["unch-method"]] %||% "legacy")
+do_sens       <- isTRUE(opt$sensitivity)
+lfc_up        <- log2(up_fc)
+if (!unch_main %in% c("legacy", "lessabs"))
+  stop("--unch-method must be 'legacy' or 'lessabs'; got '", unch_main, "'.", call. = FALSE)
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 parse_contrasts <- function(s) {
@@ -104,10 +121,16 @@ mh  <- counts(dds, normalized = TRUE)
 len <- abs(gga$DominantTES - gga$DominantTSS) + 1; names(len) <- rownames(gga)
 common <- intersect(rownames(mh), rownames(gga))
 smd <- function(m, o) if (length(m) < 1 || length(o) < 2 || sd(o) == 0) NA_real_ else (mean(m) - mean(o)) / sd(o)
+bal_flag <- function(n_input, n_matched, smd_len)
+  ifelse(n_input < 10, "n<10",
+  ifelse(n_matched == 0, "FAILED",
+  ifelse(is.na(smd_len), "-",
+  ifelse(abs(smd_len) <= 0.1, "yes", "NO"))))
 
-## For a contrast, return the Up/Dn input lists, the shared unchanged pool, and a
-## per-gene covariate frame (expression = log2 counts/kb at baseline; length).
-prep_contrast <- function(num, den) {
+## For a contrast, return the Up/Dn input lists, the unchanged pool (per unch_method),
+## and a per-gene covariate frame. The DE (Up/Dn) calls are the same regardless of how
+## the unchanged pool is defined; only `pool` depends on unch_method.
+prep_contrast <- function(num, den, unch_method = "legacy") {
   res <- as.data.frame(results(dds, contrast = c("condition", num, den)))
   bs  <- colnames(dds)[dds$condition == den]
   ck  <- rowMeans(mh[common, bs, drop = FALSE]) / (len[common] / 1000)          # counts/kb (baseline)
@@ -117,11 +140,20 @@ prep_contrast <- function(num, den) {
   elig <- rownames(gm)[gga[rownames(gm), "GeneType"] %in% gene_type & len[rownames(gm)] >= min_len]
   up_  <- intersect(rownames(res)[!is.na(res$padj) & res$padj <= padj_de & res$log2FoldChange >=  lfc_up], elig)
   dn_  <- intersect(rownames(res)[!is.na(res$padj) & res$padj <= padj_de & res$log2FoldChange <= -lfc_up], elig)
-  lfc_lin <- 2^res$log2FoldChange
-  unch <- rownames(res)[!is.na(res$padj) & !is.na(lfc_lin) & res$padj > unch_padj &
-                        lfc_lin <= unch_fc & lfc_lin >= 1/unch_fc]
+  if (unch_method == "lessabs") {
+    # DESeq2 equivalence test: reject |LFC| >= log2(unch_fc) => confidently within the band.
+    # lessAbs is a thresholded Wald test on the MLE; it needs no shrinkage, so it works with contrast=.
+    resE <- as.data.frame(results(dds, contrast = c("condition", num, den),
+                                  lfcThreshold = log2(unch_fc), altHypothesis = "lessAbs",
+                                  alpha = lessabs_alpha))
+    unch <- rownames(resE)[!is.na(resE$padj) & resE$padj <= lessabs_alpha]
+  } else {
+    lfc_lin <- 2^res$log2FoldChange
+    unch <- rownames(res)[!is.na(res$padj) & !is.na(lfc_lin) & res$padj > unch_padj &
+                          lfc_lin <= unch_fc & lfc_lin >= 1/unch_fc]
+  }
   pool <- setdiff(intersect(unch, elig), c(up_, dn_))                            # unchanged, minus either tail
-  list(gm = gm, up = up_, dn = dn_, pool = pool, num = num, den = den)
+  list(gm = gm, up = up_, dn = dn_, pool = pool, num = num, den = den, unch_method = unch_method)
 }
 
 ## Three matched sets for an arbitrary input set (up or dn), all from the SAME pool.
@@ -137,8 +169,28 @@ run_methods <- function(P, input) {
   list(`expressionMatched (expr)` = em, `MatchIt (expr)` = mie, `MatchIt (expr+len)` = mil)
 }
 
-## Return the actual 1:1 pairs MatchIt forms (which pool gene each input gene is matched to),
-## replicating the repo's matchitMatched() setup so the pairs are faithful to the report.
+## Run all three matchers over both directions of a prepared contrast; return the
+## SMD rows plus the per-direction matched sets (for figures).
+dir_defs <- c(Up = "up", Dn = "dn")   # Up: linear FC >= up_fc; Dn: linear FC <= 1/up_fc; both padj <= padj_de
+evaluate <- function(P, nm) {
+  rows <- data.frame(); sets_by_dir <- list()
+  for (dir in names(dir_defs)) {
+    input <- P[[dir_defs[[dir]]]]
+    sets  <- run_methods(P, input)
+    sets_by_dir[[dir]] <- sets
+    for (mth in names(sets)) {
+      ids <- sets[[mth]]
+      rows <- rbind(rows, data.frame(
+        Contrast = nm, Dir = dir, Method = mth, n_input = length(input), n_matched = length(ids),
+        SMD_expr = round(smd(P$gm[ids,"expr"], P$gm[input,"expr"]), 3),
+        SMD_length = round(smd(P$gm[ids,"loglen"], P$gm[input,"loglen"]), 3),
+        stringsAsFactors = FALSE))
+    }
+  }
+  list(rows = rows, sets = sets_by_dir)
+}
+
+## Return the actual 1:1 pairs MatchIt forms (which pool gene each input gene is matched to).
 matchit_pairs <- function(gm, input, pool, covars) {
   use  <- c(input, pool)
   mf   <- data.frame(treat = as.integer(use %in% input),
@@ -152,40 +204,62 @@ matchit_pairs <- function(gm, input, pool, covars) {
   data.frame(input_gene = rownames(mm), ctrl = mm[, 1], row.names = NULL, stringsAsFactors = FALSE)
 }
 
-## ---- run all contrasts x {Up, Dn} ----
-preps <- list()
-for (ct in cands) preps[[paste(ct[1], "vs", ct[2])]] <- prep_contrast(ct[1], ct[2])
-summary_tab <- data.frame(); figdata <- list()
-dir_defs <- c(Up = "up", Dn = "dn")   # Up: linear FC >= up_fc; Dn: linear FC <= 1/up_fc; both padj <= padj_de
-for (nm in names(preps)) {
-  P <- preps[[nm]]
-  for (dir in names(dir_defs)) {
-    input <- P[[dir_defs[[dir]]]]
-    sets  <- run_methods(P, input)
-    for (mth in names(sets)) {
-      ids <- sets[[mth]]
-      summary_tab <- rbind(summary_tab, data.frame(
-        Contrast = nm, Dir = dir, Method = mth, n_input = length(input), n_matched = length(ids),
-        SMD_expr = round(smd(P$gm[ids,"expr"], P$gm[input,"expr"]), 3),
-        SMD_length = round(smd(P$gm[ids,"loglen"], P$gm[input,"loglen"]), 3)))
-    }
-    figdata[[sprintf("%s [%s]", nm, dir)]] <- list(P = P, input = input, sets = sets, nm = nm, dir = dir)
+## ---- run all contrasts x {Up, Dn} under the required pool definition(s) ----
+methods_eval <- unique(c(unch_main, if (do_sens) c("legacy", "lessabs")))
+preps <- list(); evals <- list(); setsmap <- list()
+for (ct in cands) {
+  nm <- paste(ct[1], "vs", ct[2]); preps[[nm]] <- list(); evals[[nm]] <- list(); setsmap[[nm]] <- list()
+  for (um in methods_eval) {
+    P  <- prep_contrast(ct[1], ct[2], um)
+    ev <- evaluate(P, nm)
+    preps[[nm]][[um]] <- P; evals[[nm]][[um]] <- ev$rows; setsmap[[nm]][[um]] <- ev$sets
   }
 }
-summary_tab$length_balanced <- with(summary_tab,
-  ifelse(n_input < 10,           "n<10",     # too few input genes for a meaningful SMD
-  ifelse(n_matched == 0,         "FAILED",   # matcher could not return a set (see note)
-  ifelse(is.na(SMD_length),      "-",
-  ifelse(abs(SMD_length) <= 0.1, "yes", "NO")))))
+
+## main summary table (under the chosen --unch-method)
+summary_tab <- do.call(rbind, lapply(names(evals), function(nm) evals[[nm]][[unch_main]]))
+summary_tab$length_balanced <- bal_flag(summary_tab$n_input, summary_tab$n_matched, summary_tab$SMD_length)
 csv_path <- file.path(out_dir, "summary_table.csv")
 write.csv(summary_tab, csv_path, row.names = FALSE)
-cat("\n=== Summary table ===\n"); print(summary_tab, row.names = FALSE)
+cat(sprintf("\n=== Summary table (unchanged pool: %s) ===\n", unch_main)); print(summary_tab, row.names = FALSE)
 
-## ---- mechanism worked example (the --mech contrast) ----
+## figure data (per-contrast ECDF panels) under the chosen --unch-method
+figdata <- list()
+for (nm in names(preps)) {
+  P <- preps[[nm]][[unch_main]]; S <- setsmap[[nm]][[unch_main]]
+  for (dir in names(dir_defs))
+    figdata[[sprintf("%s [%s]", nm, dir)]] <- list(P = P, input = P[[dir_defs[[dir]]]], sets = S[[dir]], nm = nm, dir = dir)
+}
+
+## ---- sensitivity: compare legacy vs lessabs unchanged pools ----
+sens <- NULL; poolsz <- NULL
+if (do_sens) {
+  leg <- do.call(rbind, lapply(names(evals), function(nm) evals[[nm]][["legacy"]]))
+  les <- do.call(rbind, lapply(names(evals), function(nm) evals[[nm]][["lessabs"]]))
+  sens <- merge(leg, les, by = c("Contrast","Dir","Method"), suffixes = c("_leg","_les"))
+  sens$flag_leg <- bal_flag(sens$n_input_leg, sens$n_matched_leg, sens$SMD_length_leg)
+  sens$flag_les <- bal_flag(sens$n_input_les, sens$n_matched_les, sens$SMD_length_les)
+  sens$agree    <- sens$flag_leg == sens$flag_les
+  method_order <- c("expressionMatched (expr)", "MatchIt (expr)", "MatchIt (expr+len)")
+  ord <- order(match(sens$Contrast, names(evals)), sens$Dir, match(sens$Method, method_order))
+  sens <- sens[ord, ]
+  poolsz <- data.frame(
+    Contrast   = names(preps),
+    n_up       = sapply(names(preps), function(nm) length(preps[[nm]][["legacy"]]$up)),
+    n_dn       = sapply(names(preps), function(nm) length(preps[[nm]][["legacy"]]$dn)),
+    pool_legacy  = sapply(names(preps), function(nm) length(preps[[nm]][["legacy"]]$pool)),
+    pool_lessabs = sapply(names(preps), function(nm) length(preps[[nm]][["lessabs"]]$pool)),
+    stringsAsFactors = FALSE)
+  sens_csv <- file.path(out_dir, "sensitivity_table.csv")
+  write.csv(sens, sens_csv, row.names = FALSE)
+  cat("\n=== Unchanged-pool sensitivity (legacy vs lessAbs) ===\n"); print(poolsz, row.names = FALSE)
+}
+
+## ---- mechanism worked example (the --mech contrast, under the chosen pool) ----
 mech_nm <- paste(mech_c[1], "vs", mech_c[2])
-mechP <- preps[[mech_nm]] %||% prep_contrast(mech_c[1], mech_c[2])
+mechP <- preps[[mech_nm]][[unch_main]] %||% prep_contrast(mech_c[1], mech_c[2], unch_main)
 g <- mechP$gm
-mech_in <- mechP$dn                                          # Dn: often the length-skewed, decile-starved case
+mech_in <- mechP$dn
 pe <- matchit_pairs(g, mech_in, mechP$pool, "expr")
 pb <- matchit_pairs(g, mech_in, mechP$pool, c("expr", "loglen"))
 mech <- merge(pe, pb, by = "input_gene", suffixes = c("_E", "_EL"))
@@ -198,7 +272,6 @@ sym <- function(ids) { s <- gga[ids, "GeneName"]; s[is.na(s) | s == ""] <- ids[i
 md   <- mech[mech$ctrl_E != mech$ctrl_EL, ]
 rep4 <- head(md[order(md$lenerrE - md$lenerrEL, decreasing = TRUE), ], 4)
 med_fold <- if (nrow(mech)) c(E = 10^median(mech$lenerrE), EL = 10^median(mech$lenerrEL)) else c(E = NA, EL = NA)
-# all-three view on the Up direction of the mech contrast
 up_in <- mechP$up
 edU   <- data.frame(GeneID = c(up_in, mechP$pool), Expression = g[c(up_in, mechP$pool), "counts_kb"])
 emU   <- intersect(unique(na.omit(tryCatch(expressionMatched(up_in, mechP$pool, edU, deciles, setSeedNum = 1),
@@ -224,14 +297,17 @@ pdf(pdf_path, width = 11, height = 8.5)
 # page 1: title + summary table
 par(mar = c(1,1,1,1)); plot.new()
 text(0.5, 0.96, "Expression-matched control sets: method comparison on real data", font = 2, cex = 1.3)
-text(0.5, 0.91, sprintf("Up (linear FC >= %.2f) and Dn (linear FC <= 1/%.2f) sets, both padj <= %g", up_fc, up_fc, padj_de), cex = 0.9)
-text(0.02, 0.85, "Summary", adj = 0, font = 2, cex = 1.1)
+text(0.5, 0.915, sprintf("Up (linear FC >= %.2f) and Dn (linear FC <= 1/%.2f) sets, both padj <= %g", up_fc, up_fc, padj_de), cex = 0.9)
+text(0.5, 0.885, sprintf("Unchanged pool: %s", if (unch_main=="lessabs")
+       sprintf("lessAbs equivalence (|FC| confidently < %.2f, padj <= %g)", unch_fc, lessabs_alpha)
+     else sprintf("legacy band (padj > %g & linear FC in [1/%.2f, %.2f])", unch_padj, unch_fc, unch_fc)), cex = 0.8, font = 3)
+text(0.02, 0.83, "Summary", adj = 0, font = 2, cex = 1.1)
 tt <- summary_tab
 hdr <- c("Contrast","Dir","Method","n_input","n_matched","SMD_expr","SMD_length","len_bal")
 x   <- c(0.02, 0.26, 0.34, 0.56, 0.66, 0.75, 0.84, 0.93)
-y <- 0.825
+y <- 0.805
 text(x, y, hdr, adj = 0, font = 2, cex = 0.60, family = "mono")
-row_dy <- min(0.0275, (0.70) / max(nrow(tt), 1))
+row_dy <- min(0.0275, 0.70 / max(nrow(tt), 1))
 for (i in seq_len(nrow(tt))) {
   y <- y - row_dy
   if (i > 1 && tt$Contrast[i] != tt$Contrast[i-1]) y <- y - row_dy * 0.3
@@ -254,7 +330,7 @@ line <- function(txt, dy = 0.040, cex = 0.86, font = 1, col = "black", xx = 0.03
 }
 gap <- function(d = 0.016) yy <<- yy - d
 gap(0.02)
-line("1.  Same pool, different rule.  Both matchers draw controls ONLY from the unchanged-gene pool (padj > unch-padj and linear FC within [1/unch-fc, unch-fc]).", font = 2)
+line("1.  Same pool, different rule.  All three matchers draw controls ONLY from the unchanged-gene pool (defined once per contrast; see --unch-method).", font = 2)
 line("     Every control MatchIt returns is a member of that pool — it never samples outside the unchanged set, and never relaxes what 'expression-matched' means.")
 gap()
 line("2.  expressionMatched (legacy) — rigid bins.  It sorts genes into expression deciles, then draws an equal number of pool genes from EACH decile,", font = 2)
@@ -268,8 +344,8 @@ line("4.  A second yardstick, not a new definition.  With covars = expr + length
 line("     closest in BOTH at once (Mahalanobis distance, each axis scaled by its spread).  Expression is still matched to SMD ~ 0; length just stops being")
 line(sprintf("     ignored.  This works because the unchanged pool (here %d genes) is large enough to contain genes that match on expression AND length together.", length(mechP$pool)))
 gap(0.022)
-line(sprintf("Worked example — %s, %s (%d genes).  Representative pairs where the two rules chose different controls (length in bp):",
-             mech_nm, "Dn", length(mech_in)), font = 2, cex = 0.82)
+line(sprintf("Worked example — %s, Dn (%d genes).  Representative pairs where the two rules chose different controls (length in bp):",
+             mech_nm, length(mech_in)), font = 2, cex = 0.82)
 gap(0.004)
 line(sprintf("%-22s %-28s %-28s", "input gene (len)", "expr-only control (len)", "expr+len control (len)"), cex = 0.72, mono = TRUE, font = 2)
 if (nrow(rep4)) for (i in seq_len(nrow(rep4))) {
@@ -286,7 +362,7 @@ if (is.finite(med_fold["E"]))
                med_fold["E"], med_fold["EL"]), cex = 0.8, font = 3)
 line("The next pages show these pairs as a joint expression x length map — the view that actually captures what MatchIt does.", cex = 0.8, font = 3, dy = 0.032)
 
-# page 3: mechanism figure — joint expression x length map with matched-pair links (mech contrast, Dn)
+# page 3: mechanism figure (mech contrast, Dn)
 if (nrow(mech) > 1) {
   layout(matrix(c(1,2,3,3), nrow = 2, byrow = TRUE), heights = c(2.1, 1))
   par(mar = c(4.2,4.2,3,1), oma = c(2.2,0,2.4,0))
@@ -314,7 +390,7 @@ if (nrow(mech) > 1) {
                     sprintf("expr+len  (median %.2fx off)", med_fold["EL"])))
   mtext(sprintf("Mechanism (%s, Dn, %d pairs): each segment links an input gene (black) to the unchanged control MatchIt paired it with", mech_nm, nrow(mech)),
         outer = TRUE, font = 2, cex = 1.0)
-  if (length(mechP$dn) > 0 && length(figdata[[sprintf("%s [Dn]", mech_nm)]]$sets[["expressionMatched (expr)"]]) == 0)
+  if (length(mechP$dn) > 0 && length(setsmap[[mech_nm]][[unch_main]][["Dn"]][["expressionMatched (expr)"]]) == 0)
     mtext("expressionMatched produced no set for this input (decile draw FAILED), so it has nothing to project here — see the Up page for all three methods.",
           outer = TRUE, side = 1, line = 0.7, font = 3, cex = 0.8)
 }
@@ -359,7 +435,7 @@ if (length(up_in) >= 10) {
         mech_nm, length(up_in)), outer = TRUE, font = 2, cex = 0.82)
 }
 
-# pages 5+: per-contrast, per-direction marginal ECDF panels (expression and length)
+# per-contrast, per-direction marginal ECDF panels (expression and length)
 for (key in names(figdata)) {
   fd <- figdata[[key]]
   if (length(fd$input) < 10) next
@@ -372,5 +448,56 @@ for (key in names(figdata)) {
   mtext(sprintf("%s  —  %s-regulated  (n = %d genes)", fd$nm, fd$dir, length(fd$input)),
         outer = TRUE, font = 2, cex = 1.1)
 }
+
+# final page (if --sensitivity): unchanged-pool definition comparison
+if (do_sens) {
+  layout(1); par(mfrow = c(1,1), mar = c(1,1,1,1)); plot.new()   # reset the multi-panel layout first
+  text(0.5, 0.965, "Unchanged-pool sensitivity: legacy band vs lessAbs equivalence", font = 2, cex = 0.95)
+  text(0.5, 0.933, "lessAbs is NOT a matcher — it is a different way to DEFINE the pool all matchers draw from. Same inputs, same matchers; only the pool changes.", cex = 0.66, font = 3)
+  yy <- 0.905
+  sline <- function(txt, dy=0.030, cex=0.68, font=1, col="black", xx=0.03, mono=FALSE) { yy <<- yy - dy; text(xx, yy, txt, adj=0, cex=cex, font=font, col=col, family=if(mono)"mono" else "") }
+  sline(sprintf("legacy : padj > %g AND linear FC in [1/%.2f, %.2f]   (not significant, inside band)", unch_padj, unch_fc, unch_fc), cex=0.66)
+  sline(sprintf("lessAbs: results(lfcThreshold=log2(%.2f), altHypothesis='lessAbs'), padj <= %g   (confidently inside band)", unch_fc, lessabs_alpha), cex=0.66)
+  yy <- yy - 0.012
+  # pool sizes
+  sline("Pool sizes (controls available to every matcher):", dy=0.032, font=2, cex=0.74)
+  sline(sprintf("%-27s %6s %6s %11s %11s %6s", "Contrast","n_up","n_dn","pool_leg","pool_lAbs","ratio"), cex=0.66, mono=TRUE, font=2)
+  for (i in seq_len(nrow(poolsz))) {
+    r <- poolsz[i, ]
+    sline(sprintf("%-27s %6d %6d %11d %11d %5.2fx", r$Contrast, r$n_up, r$n_dn, r$pool_legacy, r$pool_lessabs, r$pool_lessabs/r$pool_legacy),
+          cex=0.66, mono=TRUE, dy=0.027)
+  }
+  yy <- yy - 0.016
+  # pivoted flag table: one row per contrast x direction; each method's flag under legacy / lessAbs
+  sline("Length-balance verdict per matcher (legacy / lessAbs).  yes = balanced; NO = imbalanced; FAILED = no set; n<10 = too few.", dy=0.032, font=2, cex=0.74)
+  mcols <- c("expressionMatched (expr)","MatchIt (expr)","MatchIt (expr+len)")
+  getflag <- function(ct, dr, mth, w) { r <- sens[sens$Contrast==ct & sens$Dir==dr & sens$Method==mth, ]
+    if (!nrow(r)) "-" else if (w=="L") r$flag_leg[1] else r$flag_les[1] }
+  cd <- unique(sens[, c("Contrast","Dir")])
+  cd <- cd[order(match(cd$Contrast, names(evals)), match(cd$Dir, c("Up","Dn"))), ]
+  xc <- c(0.03, 0.315, 0.38, 0.56, 0.76)
+  yy <- yy - 0.028
+  text(xc, yy, c("Contrast","Dir","expressionMatched","MatchIt(expr)","MatchIt(expr+len)"), adj=0, cex=0.62, family="mono", font=2)
+  for (i in seq_len(nrow(cd))) {
+    ct <- cd$Contrast[i]; dr <- cd$Dir[i]; yy <- yy - 0.027
+    if (i > 1 && ct != cd$Contrast[i-1]) yy <- yy - 0.007
+    cells <- sapply(mcols, function(m) sprintf("%s / %s", getflag(ct,dr,m,"L"), getflag(ct,dr,m,"E")))
+    disagree <- sapply(mcols, function(m) getflag(ct,dr,m,"L") != getflag(ct,dr,m,"E"))
+    text(xc[1], yy, ct, adj=0, cex=0.60, family="mono")
+    text(xc[2], yy, dr, adj=0, cex=0.60, family="mono")
+    for (j in seq_along(mcols))
+      text(xc[j+2], yy, cells[j], adj=0, cex=0.60, family="mono", col=if (disagree[j]) "red3" else "black")
+  }
+  n_dis <- sum(!sens$agree)
+  yy <- yy - 0.03
+  text(0.03, yy, sprintf("Cells in red = verdict changes with the pool definition (%d of %d method-rows).", n_dis, nrow(sens)), adj=0, cex=0.68, font=2)
+  text(0.03, yy-0.028, "Reading it: MatchIt(expr+len) stays the best matcher; the case for joint length matching is, if anything, stronger.", adj=0, cex=0.66, font=3)
+  text(0.03, yy-0.052, "But the lessAbs pool is itself length-biased — proving equivalence needs power, which favours longer / well-expressed", adj=0, cex=0.66, font=3)
+  text(0.03, yy-0.076, "genes — so expression-only matching gets WORSE under it (e.g. sto1, balanced under the legacy pool, flips to imbalanced),", adj=0, cex=0.66, font=3)
+  text(0.03, yy-0.100, "and a much smaller lessAbs pool can even leave expr+len short of balance. The unchanged DEFINITION therefore matters", adj=0, cex=0.66, font=3)
+  text(0.03, yy-0.124, "alongside the matcher: a statistically cleaner pool does not remove — and can amplify — the gene-length confound.", adj=0, cex=0.66, font=3)
+}
+
 invisible(dev.off())
 cat(sprintf("\nWrote:\n  %s\n  %s\n", csv_path, pdf_path))
+if (do_sens) cat(sprintf("  %s\n", sens_csv))

@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-05 · claude/bold-cannon-bv332x
+- method_comparison_report.R: add an unchanged-pool definition axis - --unch-method legacy|lessabs (DESeq2 lessAbs equivalence test, compatible with contrast=) and --sensitivity to run both and append a comparison section + sensitivity_table.csv. lessAbs is treated as a pool definition, not a matcher. Finding (documented, not a code change): the lessAbs pool is length-biased (equivalence needs power -> favours longer genes), so expression-only matching degrades under it while MatchIt(expr+len) stays best. No change to library code. affects results: no
+
+## 2026-11-05 · claude/bold-cannon-bv332x
 - Add examples/method_comparison_report.R (+ examples/README.md): reproducible worked example comparing expressionMatched vs MatchIt(expr) vs MatchIt(expr+len) on a real DESeq2 dataset across contrasts and both up/down directions; emits summary_table.csv + multi-page PDF (summary, how-MatchIt-works explainer, joint expression×length mechanism figures, per-contrast ECDF panels). Uses the shared functions.R matchers; no change to library code. affects results: no
 
 ## 2026-11-04 · main
