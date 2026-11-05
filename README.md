@@ -30,10 +30,10 @@ For a supplied list of genes of interest, the matcher:
 
 1. **Defines the unchanged pool** — genes that are *not* differentially expressed in
    **every** contrast (`padj > 0.1` **and** linear fold change within `[1/1.3, 1.3]`),
-   restricted to **protein-coding** genes **≥ 1 kb**. Those two thresholds are set as
-   constants near the top of the script (`p_thresh`, `fc_thresh`) and encode a
-   judgement about what counts as "unchanged" (see *Defining "unchanged"* below). Your
-   genes of interest are supplied by you and are not subjected to these filters.
+   restricted to **protein-coding** genes **≥ 1 kb**. Those two thresholds are set per
+   run with `--padj` and `--fc-thresh` and encode a judgement about what counts as
+   "unchanged" (see *Defining "unchanged"* below). Your genes of interest are supplied
+   by you and are not subjected to these filters.
 2. **Computes per-gene covariates** from the **baseline** condition — length-normalized
    expression (counts/kb, `log2`), gene length (`log10`), plus any extra numeric
    covariates you provide.
@@ -88,7 +88,12 @@ Rscript matchit_match.R \
 | `--method` | `matchit` | `matchit` = Mahalanobis covariate matching; `expression`/`legacy` = decile expression-only (reproduces old control sets). |
 | `--window` | `0` | bp subtracted from each gene's length in the counts/kb normalization. |
 | `--ratio` | `1` | Controls per gene of interest. |
+| `--padj` | `0.1` | Unchanged pool: a gene is "not significant" if `padj > this` (in every contrast). |
+| `--fc-thresh` | `1.3` | Unchanged pool: linear fold change must lie within `[1/this, this]`. |
 | `--outdir` | `matchit_output` | Output directory. |
+
+`--padj` and `--fc-thresh` set what counts as "unchanged" (see below); they are
+recorded in `run_info.<method>.txt` for reproducibility.
 
 **`--covars`** accepts the keywords `expression` (counts/kb, `log2`) and `length`
 (`log10`), any numeric **GGA WORKING_FILE** column by name, and any column of
@@ -107,14 +112,13 @@ balance table and per-covariate quantile/density/ECDF plots).
 The control pool is the set of genes called **unchanged** across all contrasts. Two
 ways to define that were evaluated:
 
-- **hard cutoff (used):** `padj > p_thresh` **and** linear fold change within a small
-  band `[1/fc_thresh, fc_thresh]`, defaulting to `p_thresh = 0.1` and `fc_thresh = 1.3`
-  (set as constants at the top of `matchit_match.R` / `archive/main.R`). Choosing these
-  is a **user judgement** — the biologically meaningful "no change" effect size — which
-  is the methodologically correct way to set it (there is no non-circular way to derive
-  it from the same data). For this assay the `1.3×` band also sits at the measured
-  replicate **noise floor**, so the default is not arbitrary. Change the definition by
-  editing those two constants.
+- **hard cutoff (used):** `padj > --padj` **and** linear fold change within a small band
+  `[1/--fc-thresh, --fc-thresh]`, defaulting to `--padj 0.1` and `--fc-thresh 1.3`.
+  Choosing these is a **user judgement** — the biologically meaningful "no change" effect
+  size — which is the methodologically correct way to set it (there is no non-circular
+  way to derive it from the same data). For this assay the `1.3×` band also sits at the
+  measured replicate **noise floor**, so the default is not arbitrary. (The legacy
+  `archive/main.R` keeps these as the `p_thresh` / `fc_thresh` script constants.)
 - **`lessAbs` equivalence (evaluated, not used):** DESeq2's equivalence test. Rigorous for
   *stating* that genes are unchanged, but its power-dependence biases the pool toward
   long / high-expression genes and breaks the common support that nearest-neighbour

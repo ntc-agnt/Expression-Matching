@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-05 · claude/bold-cannon-bv332x
+- matchit_match.R: expose the unchanged-pool thresholds as flags --padj (default 0.1) and --fc-thresh (default 1.3), replacing the hardcoded p_thresh/fc_thresh constants, so the significance/fold-change definition of "unchanged" is a per-run user choice; values are validated and recorded in run_info (also now logs window and pool size). Defaults are unchanged, so existing runs are byte-identical. archive/main.R (frozen legacy) keeps its constants. affects results: no (unless the user overrides the defaults)
+
+## 2026-11-05 · claude/bold-cannon-bv332x
 - Docs only: rewrote the top-level README around the current toolset (matchit_match.R recommended, functions.R, archive/main.R legacy, tests/, examples/) with example usage and a "Defining unchanged" section. Added a Decision note to examples/README.md recording that lessAbs was evaluated and set aside for control pools (power-dependent coverage bias breaks matching common-support; threshold is a user judgement) - the hard-cutoff definition with a user-set significance threshold is what the pipeline uses. No code change. affects results: no
 
 ## 2026-11-05 · claude/bold-cannon-bv332x

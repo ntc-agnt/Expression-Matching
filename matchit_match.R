@@ -29,12 +29,14 @@
 # Usage:
 #   Rscript matchit_match.R --genes genes.txt --deseq-dir DIR --gga GGA.WORKING_FILE.txt \
 #     --manifest DESeq_manifest.txt --baseline WT [--window 0] [--covars expression] \
-#     [--covar-file extra.txt] [--ratio 1] [--outdir matchit_output]
+#     [--covar-file extra.txt] [--ratio 1] [--padj 0.1] [--fc-thresh 1.3] [--outdir matchit_output]
 #
 # Requires: R (base) + the CRAN package 'MatchIt'.
 
-p_thresh  <- 0.1    # padj cutoff: genes with padj > p_thresh are "not significant"
-fc_thresh <- 1.3    # linear fold-change band [1/fc_thresh, fc_thresh] = "unchanged"
+# Unchanged-pool thresholds default to padj > 0.1 and linear fold change within
+# [1/1.3, 1.3]; override per run with --padj and --fc-thresh (parsed below). What
+# counts as "unchanged" is a user judgement about the biologically negligible
+# effect size (see README, "Defining unchanged").
 
 ## --- locate this script and load the repo's matching + QC libraries ---
 cArgs <- commandArgs()
@@ -47,7 +49,7 @@ source(here("functions.R"))   # expressionMatched(), matchitMatched(), matchQC()
 usage <- paste(
   "Usage: Rscript matchit_match.R --genes FILE --deseq-dir DIR --gga FILE",
   "--manifest FILE --baseline NAME [--method matchit] [--window 0] [--covars expression]",
-  "[--covar-file FILE] [--ratio 1] [--outdir matchit_output]")
+  "[--covar-file FILE] [--ratio 1] [--padj 0.1] [--fc-thresh 1.3] [--outdir matchit_output]")
 argsArg <- which(startsWith(cArgs, "--args"))
 args <- if (length(argsArg)) cArgs[(argsArg + 1):length(cArgs)] else character(0)
 parse_flags <- function(a) {
@@ -68,10 +70,12 @@ required <- c("genes", "deseq-dir", "gga", "manifest", "baseline")
 missing_req <- setdiff(required, names(opt))
 if (length(missing_req)) stop("missing required argument(s): --",
                               paste(missing_req, collapse = ", --"), "\n", usage, call. = FALSE)
-window   <- suppressWarnings(as.numeric(opt[["window"]] %||% "0"))
-ratio    <- suppressWarnings(as.integer(opt[["ratio"]] %||% "1"))
-covspec  <- opt[["covars"]] %||% "expression"
-out_dir  <- opt[["outdir"]] %||% "matchit_output"
+window    <- suppressWarnings(as.numeric(opt[["window"]] %||% "0"))
+ratio     <- suppressWarnings(as.integer(opt[["ratio"]] %||% "1"))
+p_thresh  <- suppressWarnings(as.numeric(opt[["padj"]] %||% "0.1"))       # genes with padj > p_thresh are "not significant"
+fc_thresh <- suppressWarnings(as.numeric(opt[["fc-thresh"]] %||% "1.3"))  # linear fold-change band [1/fc_thresh, fc_thresh]
+covspec   <- opt[["covars"]] %||% "expression"
+out_dir   <- opt[["outdir"]] %||% "matchit_output"
 # Matching algorithm: "matchit" (default) = nearest-neighbour Mahalanobis on the
 # --covars; "expression" (alias "legacy") = the original decile expressionMatched,
 # expression-only, matching the deployed main.R behaviour.
@@ -82,6 +86,8 @@ if (!method %in% c("matchit", "expression")) {
 }
 if (is.na(window)) stop("--window must be numeric.", call. = FALSE)
 if (is.na(ratio) || ratio < 1) stop("--ratio must be an integer >= 1.", call. = FALSE)
+if (is.na(p_thresh) || p_thresh <= 0 || p_thresh > 1) stop("--padj must be a number in (0, 1].", call. = FALSE)
+if (is.na(fc_thresh) || fc_thresh < 1) stop("--fc-thresh must be a number >= 1 (band is [1/fc-thresh, fc-thresh]).", call. = FALSE)
 for (f in c(opt$genes, opt$gga, opt$manifest)) if (!file.exists(f)) stop("file not found: ", f, call. = FALSE)
 if (!dir.exists(opt[["deseq-dir"]])) stop("DESeq2 dir not found: ", opt[["deseq-dir"]], call. = FALSE)
 if (!is.null(opt[["covar-file"]]) && !file.exists(opt[["covar-file"]])) stop("covar-file not found: ", opt[["covar-file"]], call. = FALSE)
@@ -187,6 +193,10 @@ writeLines(matched, out_list)
 writeLines(c(sprintf("method\t%s", method),
              sprintf("covariates\t%s", if (method == "expression") "expression" else paste(covar_names, collapse = ",")),
              sprintf("baseline\t%s", opt$baseline),
+             sprintf("unchanged_padj_gt\t%g", p_thresh),
+             sprintf("unchanged_fc_band\t[1/%g, %g]", fc_thresh, fc_thresh),
+             sprintf("window\t%g", window),
+             sprintf("n_unchanged_pool\t%d", length(pool)),
              sprintf("n_genes_of_interest\t%d", length(genes_of_interest)),
              sprintf("n_matched\t%d", length(matched)),
              sprintf("generated\t%s", format(Sys.time()))),
