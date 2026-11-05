@@ -14,6 +14,9 @@ Entry format (newest first):
 <!-- entries below, newest first -->
 
 ## 2026-11-05 · claude/bold-cannon-bv332x
+- QC consolidation: matchQC() (functions.R) now also writes a joint "fit overlap" scatter (<prefix>_overlap.png, one panel per covariate pair) alongside the balance table and marginal plots, so the per-match QC shows joint-space coverage that the marginals can miss (e.g. leftover GC). Hoisted smd() to a single shared top-level helper and removed its 5 duplicate definitions (functions.R inner, benchmark, 3 examples). Deleted the orphaned legacy tests/qc.R (violin/Wilcoxon QC, superseded by matchQC and sourced by nothing). README updated. No change to matcher outputs. affects results: no
+
+## 2026-11-05 · claude/bold-cannon-bv332x
 - matchit_match.R: expose the unchanged-pool thresholds as flags --padj (default 0.1) and --fc-thresh (default 1.3), replacing the hardcoded p_thresh/fc_thresh constants, so the significance/fold-change definition of "unchanged" is a per-run user choice; values are validated and recorded in run_info (also now logs window and pool size). Defaults are unchanged, so existing runs are byte-identical. archive/main.R (frozen legacy) keeps its constants. affects results: no (unless the user overrides the defaults)
 
 ## 2026-11-05 · claude/bold-cannon-bv332x

@@ -165,10 +165,21 @@ matchitMatched <- function(geneset, ctrlgeneset, dat, covars = NULL, ratio = 1) 
 #               (same frame used for matching).
 #   covars      covariate column names (default: all but the first).
 #   all_genes   optional vector of gene IDs for a genome-wide reference line.
-#   out_prefix  output file prefix; writes <prefix>_balance.txt and
-#               <prefix>_QC.png.
+#   out_prefix  output file prefix; writes <prefix>_balance.txt (SMD table),
+#               <prefix>_QC.png (per-covariate marginal views), and, when there
+#               are >= 2 covariates, <prefix>_overlap.png (the joint "fit
+#               overlap" scatter of each covariate pair).
 #
 # Returns (invisibly) the balance table (data.frame).
+
+# Standardized mean difference, the covariate-balance metric used throughout:
+# SMD = (mean_matched - mean_input) / sd_input.  |SMD| <= 0.1 is the usual
+# "balanced" convention. Shared so the drivers, benchmark and examples do not
+# each redefine it. NA when either set is too small or the input has zero spread.
+smd <- function(matched, input) {
+  if (length(matched) < 1 || length(input) < 2 || sd(input) == 0) return(NA_real_)
+  (mean(matched) - mean(input)) / sd(input)
+}
 
 matchQC <- function(geneset, matchedset, dat, covars = NULL, all_genes = NULL,
                     out_prefix = "match_qc") {
@@ -181,11 +192,7 @@ matchQC <- function(geneset, matchedset, dat, covars = NULL, all_genes = NULL,
   matched_v <- lapply(covar_cols, function(c) getv(matchedset, c))
   names(input_v) <- names(matched_v) <- covar_cols
 
-  # --- covariate-balance table ---
-  smd <- function(m, o) {
-    if (length(m) < 1 || length(o) < 2 || sd(o) == 0) return(NA_real_)
-    (mean(m) - mean(o)) / sd(o)
-  }
+  # --- covariate-balance table (uses the shared smd() defined above) ---
   bal <- vapply(covar_cols, function(c) smd(matched_v[[c]], input_v[[c]]), numeric(1))
   balance <- data.frame(covariate = covar_cols,
                         SMD = round(bal, 4),
@@ -203,65 +210,89 @@ matchQC <- function(geneset, matchedset, dat, covars = NULL, all_genes = NULL,
             "matched set may not be a fair control on that covariate.")
   }
 
-  # --- distribution plots: quantile, density, and ECDF per covariate ---
-  # Each row is one covariate; the three views (value-by-quantile, kernel
-  # density, and cumulative distribution / ECDF) all compare the genes of
-  # interest (black) with the matched controls (red dashed), against all genes
-  # (grey) as the background. When the red and black curves overlie, that
-  # covariate is well matched; a gap from the grey curve shows the matched set
-  # is a targeted control rather than a random genome-wide sample.
   if (!capabilities("png")) {
-    warning("no PNG device available; skipping distribution plots.", call. = FALSE)
+    warning("no PNG device available; skipping QC plots.", call. = FALSE)
     return(invisible(balance))
   }
-  qg <- seq(0, 1, 0.02)
-  qq <- function(v) stats::quantile(v, qg, na.rm = TRUE)
   pal <- c(all = "grey70", input = "black", matched = "red2")
-  png(paste0(out_prefix, "_QC.png"),
-      width = 1500, height = 430 * length(covar_cols), res = 130)
-  on.exit(grDevices::dev.off(), add = TRUE)
-  par(mfrow = c(length(covar_cols), 3), mar = c(4.2, 4.6, 3.2, 1))
-  first <- TRUE
-  for (col in covar_cols) {
-    iv <- input_v[[col]]; mv <- matched_v[[col]]
-    av <- if (!is.null(all_genes)) getv(all_genes, col) else NULL
+  draw_png <- function(path, w, h, drawfun) {   # open, draw, always close one device
+    grDevices::png(path, width = w, height = h, res = 130)
+    on.exit(grDevices::dev.off())
+    drawfun()
+  }
 
-    # (1) value by quantile
-    yl <- range(c(iv, mv, av), finite = TRUE)
-    plot(qg, qq(iv), type = "l", lwd = 2.6, col = pal["input"], ylim = yl,
-         xlab = "quantile", ylab = col,
-         main = sprintf("%s  (SMD = %+.3f) - quantile", col, bal[[col]]))
-    if (!is.null(av)) lines(qg, qq(av), lwd = 3, col = pal["all"])
-    lines(qg, qq(iv), lwd = 2.6, col = pal["input"])     # redraw input on top of grey
-    lines(qg, qq(mv), lwd = 2,   col = pal["matched"], lty = 2)
-
-    # (2) kernel density (needs >= 2 finite values per set)
-    plot_density <- length(iv[is.finite(iv)]) >= 2 && length(mv[is.finite(mv)]) >= 2
-    if (plot_density) {
-      dI <- density(iv, na.rm = TRUE); dM <- density(mv, na.rm = TRUE)
-      dA <- if (!is.null(av) && length(av[is.finite(av)]) >= 2) density(av, na.rm = TRUE) else NULL
-      ym <- max(c(dI$y, dM$y, if (!is.null(dA)) dA$y))
-      plot(dI, col = pal["input"], lwd = 2.6, ylim = c(0, ym),
-           xlab = col, ylab = "density", main = paste0(col, " - density"))
-      if (!is.null(dA)) { polygon(dA, col = "grey92", border = NA); lines(dA, col = pal["all"], lwd = 3) }
-      lines(dI, col = pal["input"], lwd = 2.6)
-      lines(dM, col = pal["matched"], lwd = 2, lty = 2)
-    } else {
-      plot.new(); title(main = paste0(col, " - density (too few points)"))
+  # --- (A) per-covariate marginal views: value-by-quantile, kernel density, ECDF ---
+  # Each row is one covariate; all three views compare the genes of interest (black)
+  # with the matched controls (red dashed), against all genes (grey). When the red and
+  # black curves overlie, that covariate is well matched; a gap from grey shows the
+  # matched set is a targeted control rather than a random genome-wide sample.
+  qg <- seq(0, 1, 0.02); qq <- function(v) stats::quantile(v, qg, na.rm = TRUE)
+  draw_png(paste0(out_prefix, "_QC.png"), 1500, 430 * length(covar_cols), function() {
+    par(mfrow = c(length(covar_cols), 3), mar = c(4.2, 4.6, 3.2, 1))
+    first <- TRUE
+    for (col in covar_cols) {
+      iv <- input_v[[col]]; mv <- matched_v[[col]]
+      av <- if (!is.null(all_genes)) getv(all_genes, col) else NULL
+      # (1) value by quantile
+      yl <- range(c(iv, mv, av), finite = TRUE)
+      plot(qg, qq(iv), type = "l", lwd = 2.6, col = pal["input"], ylim = yl,
+           xlab = "quantile", ylab = col,
+           main = sprintf("%s  (SMD = %+.3f) - quantile", col, bal[[col]]))
+      if (!is.null(av)) lines(qg, qq(av), lwd = 3, col = pal["all"])
+      lines(qg, qq(iv), lwd = 2.6, col = pal["input"])     # redraw input on top of grey
+      lines(qg, qq(mv), lwd = 2,   col = pal["matched"], lty = 2)
+      # (2) kernel density (needs >= 2 finite values per set)
+      if (length(iv[is.finite(iv)]) >= 2 && length(mv[is.finite(mv)]) >= 2) {
+        dI <- density(iv, na.rm = TRUE); dM <- density(mv, na.rm = TRUE)
+        dA <- if (!is.null(av) && length(av[is.finite(av)]) >= 2) density(av, na.rm = TRUE) else NULL
+        ym <- max(c(dI$y, dM$y, if (!is.null(dA)) dA$y))
+        plot(dI, col = pal["input"], lwd = 2.6, ylim = c(0, ym),
+             xlab = col, ylab = "density", main = paste0(col, " - density"))
+        if (!is.null(dA)) { polygon(dA, col = "grey92", border = NA); lines(dA, col = pal["all"], lwd = 3) }
+        lines(dI, col = pal["input"], lwd = 2.6)
+        lines(dM, col = pal["matched"], lwd = 2, lty = 2)
+      } else {
+        plot.new(); title(main = paste0(col, " - density (too few points)"))
+      }
+      if (first) legend("topright", bty = "n", lwd = 2, lty = c(1, 1, 2), col = pal,
+                        legend = c("all genes", "genes of interest (input)", "matched control"), cex = 0.8)
+      # (3) empirical cumulative distribution (ECDF)
+      plot(stats::ecdf(iv), col = pal["input"], lwd = 2.6, do.points = FALSE, verticals = TRUE,
+           xlab = col, ylab = "cumulative fraction", main = paste0(col, " - ECDF"))
+      if (!is.null(av)) plot(stats::ecdf(av), add = TRUE, col = pal["all"], lwd = 3, do.points = FALSE, verticals = TRUE)
+      plot(stats::ecdf(iv), add = TRUE, col = pal["input"], lwd = 2.6, do.points = FALSE, verticals = TRUE)
+      plot(stats::ecdf(mv), add = TRUE, col = pal["matched"], lwd = 2, lty = 2, do.points = FALSE, verticals = TRUE)
+      first <- FALSE
     }
-    if (first) legend("topright", bty = "n", lwd = 2, lty = c(1, 1, 2), col = pal,
-                      legend = c("all genes", "genes of interest (input)", "matched control"),
-                      cex = 0.8)
+  })
 
-    # (3) empirical cumulative distribution (ECDF)
-    plot(stats::ecdf(iv), col = pal["input"], lwd = 2.6, do.points = FALSE, verticals = TRUE,
-         xlab = col, ylab = "cumulative fraction", main = paste0(col, " - ECDF"))
-    if (!is.null(av)) plot(stats::ecdf(av), add = TRUE, col = pal["all"], lwd = 3,
-                           do.points = FALSE, verticals = TRUE)
-    plot(stats::ecdf(iv), add = TRUE, col = pal["input"], lwd = 2.6, do.points = FALSE, verticals = TRUE)
-    plot(stats::ecdf(mv), add = TRUE, col = pal["matched"], lwd = 2, lty = 2,
-         do.points = FALSE, verticals = TRUE)
-    first <- FALSE
+  # --- (B) joint overlap scatter (fit overlap), one panel per covariate pair ---
+  # The marginal views in (A) can each look balanced while the JOINT distribution is
+  # off (e.g. expression matched but the expression x length cloud displaced). This
+  # shows whether the matched set (red) actually sits on top of the genes of interest
+  # (black) in covariate space, against all genes (grey). Needs >= 2 covariates.
+  if (length(covar_cols) >= 2) {
+    pr <- utils::combn(length(covar_cols), 2); npair <- ncol(pr)
+    ncol_p <- min(3, npair); nrow_p <- ceiling(npair / ncol_p)
+    bg <- if (!is.null(all_genes)) {
+      ag <- intersect(as.character(all_genes), ids); if (length(ag) > 8000) sample(ag, 8000) else ag
+    } else character(0)
+    draw_png(paste0(out_prefix, "_overlap.png"), 540 * ncol_p, 520 * nrow_p, function() {
+      par(mfrow = c(nrow_p, ncol_p), mar = c(4.4, 4.4, 3, 1))
+      for (k in seq_len(npair)) {
+        cx <- covar_cols[pr[1, k]]; cy <- covar_cols[pr[2, k]]
+        xb <- if (length(bg)) as.numeric(dat[bg, cx]) else numeric(0)
+        yb <- if (length(bg)) as.numeric(dat[bg, cy]) else numeric(0)
+        plot(NA, xlim = range(c(xb, input_v[[cx]], matched_v[[cx]]), finite = TRUE),
+             ylim = range(c(yb, input_v[[cy]], matched_v[[cy]]), finite = TRUE),
+             xlab = cx, ylab = cy, main = sprintf("%s  vs  %s", cx, cy))
+        if (length(xb)) points(xb, yb, pch = 16, cex = 0.3, col = grDevices::adjustcolor(pal["all"], 0.4))
+        points(matched_v[[cx]], matched_v[[cy]], pch = 16, cex = 0.6, col = pal["matched"])
+        points(input_v[[cx]],   input_v[[cy]],   pch = 16, cex = 0.6, col = pal["input"])
+        if (k == 1) legend("topright", bty = "n", pch = 16, col = pal[c("all", "input", "matched")],
+                           legend = c("all genes", "genes of interest (input)", "matched control"), cex = 0.8)
+      }
+    })
   }
   invisible(balance)
 }

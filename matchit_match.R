@@ -209,4 +209,5 @@ message(sprintf("Wrote %d matched control genes -> %s", length(matched), out_lis
 qc_prefix <- file.path(out_dir, sprintf("match_qc.%s", method))
 matchQC(genes_of_interest, matched, dat, covars = covar_names, all_genes = common,
         out_prefix = qc_prefix)
-message(sprintf("QC written to %s_QC.png and %s_balance.txt", qc_prefix, qc_prefix))
+message(sprintf("QC written to %s_balance.txt, %s_QC.png%s", qc_prefix, qc_prefix,
+                if (length(covar_names) >= 2) sprintf(", and %s_overlap.png", qc_prefix) else ""))

@@ -49,7 +49,7 @@ gga <- read.table(opt$gga, header=TRUE, sep="\t", row.names=1, quote="", strings
 mh  <- counts(dds, normalized=TRUE)
 len <- abs(gga$DominantTES - gga$DominantTSS)+1; names(len) <- rownames(gga)
 common <- intersect(rownames(mh), rownames(gga))
-smd <- function(m,o) if (length(m)<1||length(o)<2||sd(o)==0) NA_real_ else (mean(m)-mean(o))/sd(o)
+# smd() (standardized mean difference) is provided by functions.R
 bal <- function(n_in,n_ct,s) ifelse(n_in<10,"n<10",ifelse(n_ct==0,"FAILED",ifelse(is.na(s),"-",ifelse(abs(s)<=0.1,"yes","NO"))))
 
 prep <- function(num,den){

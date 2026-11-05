@@ -19,7 +19,7 @@ unbalanced; the recommended workflow matches on expression **and** length jointl
 | **`matchit_match.R`** | **Recommended workflow.** Flagged CLI that selects controls by 1:1 nearest-neighbour Mahalanobis matching (`MatchIt`) on one or more covariates (expression, length, GC, …) and writes a full match-quality QC. Can also run the legacy expression-only algorithm. |
 | `functions.R` | The library: `expressionMatched()` (legacy decile matcher), `matchitMatched()` (covariate matcher), `matchQC()` (balance table + plots). Sourced by the drivers; usable interactively. |
 | `archive/main.R` | **Legacy** decile expression-matching driver (frozen, positional args). Kept for reproducing historical control sets. |
-| `tests/` | `benchmark_matchers.R` (synthetic stress-test comparing matchers) and `qc.R` (legacy violin QC). |
+| `tests/` | `benchmark_matchers.R` — synthetic stress-test comparing the matchers across confound scenarios. |
 | `examples/` | Reproducible reports on a **real** DESeq2 dataset comparing matchers and unchanged-pool definitions. See [`examples/README.md`](examples/README.md). |
 
 ---
@@ -50,7 +50,6 @@ For a supplied list of genes of interest, the matcher:
 - **R ≥ 4.x**
 - **`MatchIt`** (CRAN) — for the covariate matcher.
 - **`DESeq2`** (Bioconductor) — only for the `examples/` reports, not for the matcher.
-- Optional: `vioplot` (legacy violin QC; falls back to base-R box plots if absent).
 
 Inputs (NTC PRO-seq pipeline outputs):
 
@@ -141,6 +140,11 @@ Every run writes the QC automatically. Read it as:
 - **Distribution plots (`_QC.png`):** per-covariate quantile / density / ECDF curves for
   all genes, the query set, and the matched controls — the matched curve should sit on
   the query curve.
+- **Fit overlap scatter (`_overlap.png`, ≥ 2 covariates):** the matched set (red) and the
+  query set (black) in the *joint* covariate space (one panel per covariate pair), against
+  all genes (grey). The marginal plots above can each look balanced while the joint
+  distribution is displaced; here the red points should sit on top of the black. A matched
+  cloud that is shifted or forms a band is a bad fit even when the marginals look fine.
 
 ---
 
@@ -154,10 +158,11 @@ Rscript archive/main.R \
   genes_ensg.txt  DESeqOutput/  GGA.WORKING_FILE.txt  <window>  DESeq_manifest.txt  <baseline>
 ```
 
-It writes three replicate control lists (seeds 1–3) plus a violin-plot QC per seed. The
-three lists are independent random draws with the same intended properties; inspecting
-all three checks that the matching is robust to the draw. The same decile algorithm is
-available in the recommended workflow via `matchit_match.R --method expression`.
+It writes three replicate control lists (seeds 1–3) — independent random draws with the
+same intended properties, so inspecting all three checks that the matching is robust to
+the draw. It emits the matched lists only (no QC); run the QC via the recommended
+workflow, where the same decile algorithm is available as `matchit_match.R --method
+expression`.
 
 **Decile starvation:** if a run errors with *"cannot take a sample larger than the
 population when 'replace = FALSE'"*, the unchanged pool is too thin in some expression

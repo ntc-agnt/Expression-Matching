@@ -122,7 +122,7 @@ if (have_mr) {
 }
 
 ## --- run every scenario x method; record covariate balance and run status ---
-smd <- function(m, o) if (length(m) < 1 || length(o) < 2 || sd(o) == 0) NA_real_ else (mean(m) - mean(o)) / sd(o)
+## (smd() is provided by functions.R)
 rows <- list()
 for (sn in names(scenarios)) {
   focal <- intersect(scenarios[[sn]](pop), pop$gene)
