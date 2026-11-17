@@ -13,6 +13,9 @@ Entry format (newest first):
 
 <!-- entries below, newest first -->
 
+## 2026-11-17 · claude/bold-cannon-bv332x
+- Add environment.yml: conda env (conda-forge + bioconda) pinning r-base 4.3 + r-matchit + bioconductor-deseq2 1.42 (the tested build), with nullranges/GenomicRanges/IRanges as optional deps for the benchmark's matchRanges comparison. README Requirements now documents `conda env create -f environment.yml`. Not solve-verified in-session (no conda available); package names/pins are standard bioconda/conda-forge. affects results: no
+
 ## 2026-11-05 · claude/bold-cannon-bv332x
 - QC consolidation: matchQC() (functions.R) now also writes a joint "fit overlap" scatter (<prefix>_overlap.png, one panel per covariate pair) alongside the balance table and marginal plots, so the per-match QC shows joint-space coverage that the marginals can miss (e.g. leftover GC). Hoisted smd() to a single shared top-level helper and removed its 5 duplicate definitions (functions.R inner, benchmark, 3 examples). Deleted the orphaned legacy tests/qc.R (violin/Wilcoxon QC, superseded by matchQC and sourced by nothing). README updated. No change to matcher outputs. affects results: no
 

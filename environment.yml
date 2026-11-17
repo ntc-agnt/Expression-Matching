@@ -1,0 +1,27 @@
+# Conda environment for the PRO-seq control-gene matching tool.
+#
+#   conda env create -f environment.yml      # or: mamba env create -f environment.yml
+#   conda activate expression-matching
+#
+# The tool is not a package to install: clone the repo and run the Rscript
+# drivers (e.g. matchit_match.R) with this env active. See README.md.
+name: expression-matching
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  # --- core: everything matchit_match.R / functions.R need ---
+  - r-base=4.3
+  - r-matchit            # CRAN MatchIt: nearest-neighbour Mahalanobis covariate matcher
+
+  # --- examples/ reports only (reading the DESeq2 dds, lessAbs comparison) ---
+  - bioconductor-deseq2=1.42   # Bioconductor 3.18; pinned to the tested build.
+                               # r-base and deseq2 are version-locked by bioconda —
+                               # bump them together if you move off this release.
+
+  # --- optional: only for tests/benchmark_matchers.R's matchRanges comparison ---
+  #     (benchmark_matchers.R skips these gracefully if they are absent)
+  - bioconductor-nullranges
+  - bioconductor-genomicranges
+  - bioconductor-iranges

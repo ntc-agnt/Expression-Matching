@@ -51,6 +51,17 @@ For a supplied list of genes of interest, the matcher:
 - **`MatchIt`** (CRAN) — for the covariate matcher.
 - **`DESeq2`** (Bioconductor) — only for the `examples/` reports, not for the matcher.
 
+The simplest way to get these is the bundled conda env:
+
+```sh
+conda env create -f environment.yml   # or: mamba env create -f environment.yml
+conda activate expression-matching
+```
+
+Then run the drivers from the clone (there is no package to install). The env
+pins R 4.3 / DESeq2 1.42 (the tested build); `nullranges` is optional and only
+used by `tests/benchmark_matchers.R`.
+
 Inputs (NTC PRO-seq pipeline outputs):
 
 - a plain-text file of **gene IDs of interest**, one per line;
